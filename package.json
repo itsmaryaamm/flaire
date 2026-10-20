@@ -1,0 +1,46 @@
+{
+  "name": "flaire",
+  "version": "0.2.0",
+  "description": "Local-first spend controls for AI agents, built for Saudi Arabia. Simulated SAR money only.",
+  "type": "module",
+  "bin": {
+    "flaire": "src/cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "demo": "node src/cli.js demo",
+    "demo:ar": "node src/cli.js demo --lang ar",
+    "serve": "node src/cli.js serve",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YOUR-USERNAME/flaire.git"
+  },
+  "homepage": "https://github.com/YOUR-USERNAME/flaire#readme",
+  "bugs": {
+    "url": "https://github.com/YOUR-USERNAME/flaire/issues"
+  },
+  "keywords": [
+    "ai-agents",
+    "mcp",
+    "spend-controls",
+    "agent-payments",
+    "saudi",
+    "sar",
+    "lithic",
+    "guardrails"
+  ],
+  "files": [
+    "src",
+    "web",
+    "examples",
+    "README.md",
+    "LITHIC.md",
+    "LICENSE",
+    "NOTICE.md"
+  ]
+}

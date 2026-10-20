@@ -1,0 +1,11 @@
+# NEVER commit these: they hold your receipt secret and Lithic sandbox card numbers
+.flaire/
+flaire-data/
+lithic-cards.json
+secret.key
+decisions.jsonl
+.env
+.env.*
+node_modules/
+*.log
+.DS_Store
