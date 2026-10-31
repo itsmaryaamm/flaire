@@ -1,0 +1,45 @@
+# Render blueprint: one Postgres, the FastAPI backend, and the optional Shotoku sidecar.
+# Deploy: Render dashboard -> New -> Blueprint -> point at this repo.
+databases:
+  - name: flaire-db
+    plan: free
+
+services:
+  - type: web
+    name: flaire-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: ENV
+        value: prod
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flaire-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: RECEIPT_SECRET
+        generateValue: true
+      - key: AUTH_ENGINE
+        value: native
+      - key: CORS_ORIGINS
+        value: https://flaire.vercel.app   # replace with your Vercel domain
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: LITHIC_API_KEY
+        sync: false
+      - key: SHOTOKU_SERVICE_URL
+        value: http://flaire-shotoku:8788
+
+  - type: web
+    name: flaire-shotoku
+    runtime: node
+    rootDir: backend/app/integrations/shotoku/service
+    buildCommand: npm install
+    startCommand: node server.mjs
+    envVars:
+      - key: RECEIPT_SECRET
+        sync: false   # must equal flaire-api RECEIPT_SECRET

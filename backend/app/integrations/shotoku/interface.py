@@ -1,0 +1,84 @@
+"""The one interface Flaire uses to ask "is this AI employee allowed to spend this?".
+
+Everything Flaire knows about the request is packed into AuthorizationRequest. The engine answers with a
+Decision carrying a verdict, human-readable reasons, and (when approved) a signed receipt that the payment
+service verifies before it moves any simulated money. The engine never touches cards or balances.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Literal, Protocol
+
+Verdict = Literal["approved", "denied", "pending_approval"]
+
+
+@dataclass
+class AgentPolicy:
+    """The agent's own permissions as configured in the Flaire dashboard."""
+    agent_id: int
+    agent_name: str
+    status: str                       # active | paused
+    per_transaction_limit: int        # halalas
+    monthly_limit: int                # halalas
+    spent_this_period: int            # halalas
+    approval_threshold: int           # halalas; amount >= threshold needs a human
+    allowed_categories: list[str] = field(default_factory=list)   # empty = any
+    blocked_merchants: list[str] = field(default_factory=list)
+    max_requests_per_hour: int = 10
+    requests_last_hour: int = 0
+
+
+@dataclass
+class DepartmentBudget:
+    department_id: int
+    name: str
+    monthly_budget: int
+    spent_this_period: int
+
+    @property
+    def remaining(self) -> int:
+        return max(self.monthly_budget - self.spent_this_period, 0)
+
+
+@dataclass
+class AuthorizationRequest:
+    request_id: str                   # Flaire's purchase request id, used as decision id
+    company_id: int
+    amount: int                       # halalas
+    currency: str
+    merchant: str
+    category: str
+    description: str
+    agent: AgentPolicy
+    department: DepartmentBudget
+    kill_switch: bool
+    company_blocked_categories: list[str] = field(default_factory=lambda: ["gift_card", "crypto", "cash_withdrawal"])
+
+
+@dataclass
+class Decision:
+    verdict: Verdict
+    reasons: list[str]
+    engine: str
+    rule_id: str | None = None
+    receipt: str | None = None
+    summary: str = ""
+    decision_id: str | None = None   # engine-side id (Shotoku's dec_...), if any
+
+    @property
+    def approved(self) -> bool:
+        return self.verdict == "approved"
+
+
+class AuthorizationEngine(Protocol):
+    name: str
+
+    def authorize(self, req: AuthorizationRequest) -> Decision: ...
+
+    def approve(self, req: AuthorizationRequest, decision_id: str | None, approver: str) -> Decision:
+        """A human resolved a pending decision. Returns the final decision with a fresh receipt."""
+        ...
+
+    def deny(self, req: AuthorizationRequest, decision_id: str | None, approver: str) -> Decision: ...
+
+    def verify_receipt(self, receipt: str, req: AuthorizationRequest) -> tuple[bool, list[str]]: ...

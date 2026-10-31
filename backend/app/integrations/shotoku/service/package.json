@@ -1,0 +1,15 @@
+{
+  "name": "flaire-shotoku-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "HTTP wrapper around @shotoku/core so Flaire's Python backend can use Shotoku as its authorization engine.",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "@shotoku/core": "^0.2.2",
+    "yaml": "^2.9.0"
+  },
+  "license": "MIT"
+}

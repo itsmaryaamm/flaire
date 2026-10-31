@@ -1,0 +1,413 @@
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.agents.runner import run_agent_task
+from app.api.serializers import agent_out, department_out, purchase_out, transaction_out
+from app.core import audit
+from app.core.config import get_settings
+from app.core.db import get_db
+from app.core.security import create_access_token, generate_agent_key, get_current_agent, get_current_user, hash_password, require_approver, verify_password
+from app.integrations.payments import MOCK_PROVIDERS, get_adapter
+from app.models import Agent, AgentRun, AuditEntry, Card, Company, Department, PurchaseRequest, Transaction, User
+from app.schemas import (AgentCreatedOut, AgentIn, AgentKeyOut, AgentOut, AgentPatch, ApprovalIn, AuditOut, AuthOut, CardIn, CardOut, CardPatch, CompanyOut,
+                         CompanyPatch, DepartmentIn, DepartmentOut, DepartmentPatch, KillSwitchIn, LoginIn, PurchaseIn, PurchaseRequestOut, RegisterIn, RunIn,
+                         RunOut, TopUpIn, TransactionOut, UserOut)
+from app.services import ensure_period, resolve_approval, set_kill_switch, submit_purchase_request
+
+settings = get_settings()
+router = APIRouter()
+
+
+def company_of(user: User, db: Session) -> Company:
+    return db.get(Company, user.company_id)
+
+
+# ====================================================== auth
+@router.post("/auth/register", response_model=AuthOut, status_code=201, tags=["auth"])
+def register(body: RegisterIn, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == body.email.lower()).first():
+        raise HTTPException(409, "Email already registered")
+    company = Company(name=body.company_name, engine=settings.auth_engine)
+    db.add(company)
+    db.flush()
+    user = User(company_id=company.id, email=body.email.lower(), full_name=body.full_name, password_hash=hash_password(body.password), role="owner")
+    db.add(user)
+    db.flush()
+    audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="company.created", details={"name": company.name})
+    db.commit()
+    return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=CompanyOut.model_validate(company))
+
+
+@router.post("/auth/login", response_model=AuthOut, tags=["auth"])
+def login(body: LoginIn, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == body.email.lower()).first()
+    if not user or not verify_password(body.password, user.password_hash):
+        raise HTTPException(401, "Invalid email or password")
+    company = company_of(user, db)
+    return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=CompanyOut.model_validate(company))
+
+
+@router.get("/auth/me", tags=["auth"])
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return {"user": UserOut.model_validate(user), "company": CompanyOut.model_validate(company_of(user, db))}
+
+
+# ====================================================== company
+@router.get("/company", response_model=CompanyOut, tags=["company"])
+def get_company(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return company_of(user, db)
+
+
+@router.patch("/company", response_model=CompanyOut, tags=["company"])
+def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    c = company_of(user, db)
+    if body.name:
+        c.name = body.name
+    if body.engine:
+        c.engine = body.engine
+        audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="engine.changed", details={"engine": body.engine})
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+@router.post("/company/kill-switch", response_model=CompanyOut, tags=["company"])
+def kill_switch(body: KillSwitchIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    return set_kill_switch(db, company_of(user, db), user, body.enabled, body.reason)
+
+
+# ====================================================== departments
+@router.get("/departments", response_model=list[DepartmentOut], tags=["departments"])
+def list_departments(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    c = company_of(user, db)
+    ensure_period(db, c)
+    db.commit()
+    return [department_out(d) for d in db.query(Department).filter(Department.company_id == c.id).order_by(Department.id).all()]
+
+
+@router.post("/departments", response_model=DepartmentOut, status_code=201, tags=["departments"])
+def create_department(body: DepartmentIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    c = company_of(user, db)
+    d = Department(company_id=c.id, name=body.name, monthly_budget=body.monthly_budget)
+    db.add(d)
+    db.flush()
+    audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="department.created", details={"id": d.id, "name": d.name, "monthly_budget": d.monthly_budget})
+    db.commit()
+    db.refresh(d)
+    return department_out(d)
+
+
+def _dept(db: Session, user: User, dept_id: int) -> Department:
+    d = db.get(Department, dept_id)
+    if not d or d.company_id != user.company_id:
+        raise HTTPException(404, "Department not found")
+    return d
+
+
+@router.patch("/departments/{dept_id}", response_model=DepartmentOut, tags=["departments"])
+def patch_department(dept_id: int, body: DepartmentPatch, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    d = _dept(db, user, dept_id)
+    changes = body.model_dump(exclude_none=True)
+    for k, v in changes.items():
+        setattr(d, k, v)
+    audit.record(db, d.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="department.updated", details={"id": d.id, **changes})
+    db.commit()
+    db.refresh(d)
+    return department_out(d)
+
+
+@router.delete("/departments/{dept_id}", status_code=204, tags=["departments"])
+def delete_department(dept_id: int, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    d = _dept(db, user, dept_id)
+    if d.agents:
+        raise HTTPException(409, "Move or delete the department's agents first")
+    db.delete(d)
+    db.commit()
+
+
+# ====================================================== agents
+def _agent(db: Session, user: User, agent_id: int) -> Agent:
+    a = db.get(Agent, agent_id)
+    if not a or a.company_id != user.company_id:
+        raise HTTPException(404, "Agent not found")
+    return a
+
+
+@router.get("/agents", response_model=list[AgentOut], tags=["agents"])
+def list_agents(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return [agent_out(a) for a in db.query(Agent).filter(Agent.company_id == user.company_id).order_by(Agent.id).all()]
+
+
+@router.post("/agents", response_model=AgentCreatedOut, status_code=201, tags=["agents"])
+def create_agent(body: AgentIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    _dept(db, user, body.department_id)
+    plain, h, prefix = generate_agent_key()
+    a = Agent(company_id=user.company_id, api_key_hash=h, key_prefix=prefix, **body.model_dump())
+    db.add(a)
+    db.flush()
+    audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.created", details={"id": a.id, "name": a.name, "role": a.role})
+    db.commit()
+    db.refresh(a)
+    return AgentCreatedOut(agent=agent_out(a), api_key=plain)
+
+
+@router.get("/agents/{agent_id}", response_model=AgentOut, tags=["agents"])
+def get_agent(agent_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return agent_out(_agent(db, user, agent_id))
+
+
+@router.patch("/agents/{agent_id}", response_model=AgentOut, tags=["agents"])
+def patch_agent(agent_id: int, body: AgentPatch, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    a = _agent(db, user, agent_id)
+    changes = body.model_dump(exclude_none=True)
+    if "department_id" in changes:
+        _dept(db, user, changes["department_id"])
+    if "status" in changes and changes["status"] not in ("active", "paused"):
+        raise HTTPException(422, "status must be active or paused")
+    for k, v in changes.items():
+        setattr(a, k, v)
+    audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.updated", details={"id": a.id, **changes})
+    db.commit()
+    db.refresh(a)
+    return agent_out(a)
+
+
+@router.post("/agents/{agent_id}/rotate-key", response_model=AgentKeyOut, tags=["agents"])
+def rotate_key(agent_id: int, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    a = _agent(db, user, agent_id)
+    plain, h, prefix = generate_agent_key()
+    a.api_key_hash, a.key_prefix = h, prefix
+    audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.key_rotated", details={"id": a.id})
+    db.commit()
+    return AgentKeyOut(api_key=plain)
+
+
+@router.delete("/agents/{agent_id}", status_code=204, tags=["agents"])
+def delete_agent(agent_id: int, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    a = _agent(db, user, agent_id)
+    if db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == a.id).count():
+        a.status = "paused"
+        a.api_key_hash = "revoked"
+        audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.revoked", details={"id": a.id})
+    else:
+        db.delete(a)
+    db.commit()
+
+
+def _run_out(db: Session, run: AgentRun) -> RunOut:
+    prs = db.query(PurchaseRequest).filter(PurchaseRequest.id.in_(run.purchase_request_ids or [-1])).all()
+    return RunOut(run_id=run.id, agent_id=run.agent_id, task=run.task, mode=run.mode, transcript=run.transcript, purchase_requests=[purchase_out(p) for p in prs], created_at=run.created_at)
+
+
+@router.post("/agents/{agent_id}/run", response_model=RunOut, tags=["agents"])
+def run_agent(agent_id: int, body: RunIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    a = _agent(db, user, agent_id)
+    c = company_of(user, db)
+    audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.task_assigned", details={"agent_id": a.id, "task": body.task[:200]})
+    db.commit()
+    run = run_agent_task(db, c, a, body.task)
+    return _run_out(db, run)
+
+
+@router.get("/agents/{agent_id}/runs", response_model=list[RunOut], tags=["agents"])
+def list_runs(agent_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    a = _agent(db, user, agent_id)
+    runs = db.query(AgentRun).filter(AgentRun.agent_id == a.id).order_by(AgentRun.id.desc()).limit(20).all()
+    return [_run_out(db, r) for r in runs]
+
+
+# ====================================================== agent-facing (X-Agent-Key)
+@router.get("/agent/me", tags=["agent api"])
+def agent_me(agent: Agent = Depends(get_current_agent), db: Session = Depends(get_db)):
+    c = db.get(Company, agent.company_id)
+    return {**agent_out(agent).model_dump(), "department": department_out(agent.department).model_dump(), "kill_switch": c.kill_switch}
+
+
+@router.post("/agent/purchase-requests", response_model=PurchaseRequestOut, status_code=201, tags=["agent api"])
+def agent_purchase(body: PurchaseIn, agent: Agent = Depends(get_current_agent), db: Session = Depends(get_db)):
+    c = db.get(Company, agent.company_id)
+    if body.card_id and not db.query(Card).filter(Card.id == body.card_id, Card.company_id == c.id).first():
+        raise HTTPException(404, "Card not found")
+    pr = submit_purchase_request(db, c, agent, amount=body.amount, merchant=body.merchant, category=body.category, description=body.description, card_id=body.card_id)
+    return purchase_out(pr)
+
+
+@router.get("/agent/purchase-requests", response_model=list[PurchaseRequestOut], tags=["agent api"])
+def agent_requests(agent: Agent = Depends(get_current_agent), db: Session = Depends(get_db)):
+    return [purchase_out(p) for p in db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id).order_by(PurchaseRequest.id.desc()).limit(50).all()]
+
+
+@router.get("/agent/purchase-requests/{pr_id}", response_model=PurchaseRequestOut, tags=["agent api"])
+def agent_request(pr_id: int, agent: Agent = Depends(get_current_agent), db: Session = Depends(get_db)):
+    pr = db.get(PurchaseRequest, pr_id)
+    if not pr or pr.agent_id != agent.id:
+        raise HTTPException(404, "Request not found")
+    return purchase_out(pr)
+
+
+# ====================================================== purchases / approvals / transactions
+@router.get("/purchase-requests", response_model=list[PurchaseRequestOut], tags=["purchases"])
+def list_purchases(status: str | None = None, agent_id: int | None = None, limit: int = Query(50, le=500), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(PurchaseRequest).filter(PurchaseRequest.company_id == user.company_id)
+    if status:
+        q = q.filter(PurchaseRequest.status == status)
+    if agent_id:
+        q = q.filter(PurchaseRequest.agent_id == agent_id)
+    return [purchase_out(p) for p in q.order_by(PurchaseRequest.id.desc()).limit(limit).all()]
+
+
+def _pr(db: Session, user: User, pr_id: int) -> PurchaseRequest:
+    pr = db.get(PurchaseRequest, pr_id)
+    if not pr or pr.company_id != user.company_id:
+        raise HTTPException(404, "Request not found")
+    return pr
+
+
+@router.get("/purchase-requests/{pr_id}", response_model=PurchaseRequestOut, tags=["purchases"])
+def get_purchase(pr_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return purchase_out(_pr(db, user, pr_id))
+
+
+@router.get("/approvals", response_model=list[PurchaseRequestOut], tags=["approvals"])
+def list_approvals(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(PurchaseRequest).filter(PurchaseRequest.company_id == user.company_id, PurchaseRequest.status == "pending_approval")
+    return [purchase_out(p) for p in q.order_by(PurchaseRequest.id.asc()).all()]
+
+
+@router.post("/approvals/{pr_id}/approve", response_model=PurchaseRequestOut, tags=["approvals"])
+def approve(pr_id: int, body: ApprovalIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    return purchase_out(resolve_approval(db, company_of(user, db), user, _pr(db, user, pr_id), True, body.note))
+
+
+@router.post("/approvals/{pr_id}/reject", response_model=PurchaseRequestOut, tags=["approvals"])
+def reject(pr_id: int, body: ApprovalIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    return purchase_out(resolve_approval(db, company_of(user, db), user, _pr(db, user, pr_id), False, body.note))
+
+
+@router.get("/transactions", response_model=list[TransactionOut], tags=["transactions"])
+def list_transactions(card_id: int | None = None, limit: int = Query(50, le=500), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    q = db.query(Transaction).filter(Transaction.company_id == user.company_id)
+    if card_id:
+        q = q.filter(Transaction.card_id == card_id)
+    return [transaction_out(t) for t in q.order_by(Transaction.id.desc()).limit(limit).all()]
+
+
+@router.get("/transactions/{tx_id}", response_model=TransactionOut, tags=["transactions"])
+def get_transaction(tx_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    t = db.get(Transaction, tx_id)
+    if not t or t.company_id != user.company_id:
+        raise HTTPException(404, "Transaction not found")
+    return transaction_out(t)
+
+
+# ====================================================== cards
+@router.get("/cards", response_model=list[CardOut], tags=["cards"])
+def list_cards(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(Card).filter(Card.company_id == user.company_id).order_by(Card.id).all()
+
+
+@router.post("/cards", response_model=CardOut, status_code=201, tags=["cards"])
+def create_card(body: CardIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    if body.provider not in MOCK_PROVIDERS and body.provider != "lithic":
+        raise HTTPException(422, f"provider must be one of {', '.join(MOCK_PROVIDERS)}, lithic")
+    if body.department_id:
+        _dept(db, user, body.department_id)
+    try:
+        info = get_adapter(body.provider).create_card(body.label, body.credit_limit, "SAR")
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+    if body.is_default:
+        db.query(Card).filter(Card.company_id == user.company_id).update({"is_default": False})
+    card = Card(company_id=user.company_id, department_id=body.department_id, label=body.label, provider=body.provider, last4=body.last4 or info["last4"],
+                credit_limit=body.credit_limit, available_balance=info["available_balance"], provider_token=info["provider_token"], is_default=body.is_default)
+    db.add(card)
+    db.flush()
+    audit.record(db, card.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="card.added", details={"id": card.id, "label": card.label, "provider": card.provider, "last4": card.last4})
+    db.commit()
+    db.refresh(card)
+    return card
+
+
+def _card(db: Session, user: User, card_id: int) -> Card:
+    c = db.get(Card, card_id)
+    if not c or c.company_id != user.company_id:
+        raise HTTPException(404, "Card not found")
+    return c
+
+
+@router.patch("/cards/{card_id}", response_model=CardOut, tags=["cards"])
+def patch_card(card_id: int, body: CardPatch, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    card = _card(db, user, card_id)
+    changes = body.model_dump(exclude_none=True)
+    if changes.get("status") not in (None, "active", "frozen"):
+        raise HTTPException(422, "status must be active or frozen")
+    if changes.get("is_default"):
+        db.query(Card).filter(Card.company_id == user.company_id).update({"is_default": False})
+    for k, v in changes.items():
+        setattr(card, k, v)
+    audit.record(db, card.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="card.updated", details={"id": card.id, **changes})
+    db.commit()
+    db.refresh(card)
+    return card
+
+
+@router.post("/cards/{card_id}/top-up", response_model=CardOut, tags=["cards"])
+def top_up(card_id: int, body: TopUpIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    card = _card(db, user, card_id)
+    if card.provider not in MOCK_PROVIDERS:
+        raise HTTPException(409, "Top-up is only available on simulated bank cards")
+    card.available_balance += body.amount
+    audit.record(db, card.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="card.topped_up", details={"id": card.id, "amount": body.amount})
+    db.commit()
+    db.refresh(card)
+    return card
+
+
+# ====================================================== dashboard
+@router.get("/dashboard/summary", tags=["dashboard"])
+def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    c = company_of(user, db)
+    ensure_period(db, c)
+    db.commit()
+    depts = db.query(Department).filter(Department.company_id == c.id).order_by(Department.id).all()
+    agents = db.query(Agent).filter(Agent.company_id == c.id).order_by(Agent.id).all()
+    base = db.query(PurchaseRequest).filter(PurchaseRequest.company_id == c.id)
+    since = datetime.now(timezone.utc) - timedelta(days=13)
+    rows = (db.query(func.date(Transaction.created_at), func.sum(Transaction.amount)).filter(Transaction.company_id == c.id, Transaction.status == "settled", Transaction.created_at >= since)
+            .group_by(func.date(Transaction.created_at)).all())
+    by_day = {str(d): int(s or 0) for d, s in rows}
+    days = [(datetime.now(timezone.utc) - timedelta(days=i)).date() for i in range(13, -1, -1)]
+    return {
+        "company": CompanyOut.model_validate(c),
+        "kill_switch": c.kill_switch,
+        "totals": {
+            "spent_this_period": sum(d.spent_this_period for d in depts),
+            "budget_total": sum(d.monthly_budget for d in depts),
+            "pending_count": base.filter(PurchaseRequest.status == "pending_approval").count(),
+            "blocked_count": base.filter(PurchaseRequest.status.in_(["denied", "rejected", "failed"])).count(),
+            "completed_count": base.filter(PurchaseRequest.status == "completed").count(),
+            "agent_count": len(agents),
+            "card_count": db.query(Card).filter(Card.company_id == c.id).count(),
+        },
+        "departments": [department_out(d) for d in depts],
+        "agents": [agent_out(a) for a in agents],
+        "recent_requests": [purchase_out(p) for p in base.order_by(PurchaseRequest.id.desc()).limit(10).all()],
+        "recent_transactions": [transaction_out(t) for t in db.query(Transaction).filter(Transaction.company_id == c.id).order_by(Transaction.id.desc()).limit(10).all()],
+        "spend_by_day": [{"date": str(d), "amount": by_day.get(str(d), 0)} for d in days],
+    }
+
+
+# ====================================================== audit
+@router.get("/audit", response_model=list[AuditOut], tags=["audit"])
+def list_audit(limit: int = Query(100, le=1000), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return db.query(AuditEntry).filter(AuditEntry.company_id == user.company_id).order_by(AuditEntry.id.desc()).limit(limit).all()
+
+
+@router.get("/audit/verify", tags=["audit"])
+def verify_audit(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return audit.verify(db, user.company_id)
