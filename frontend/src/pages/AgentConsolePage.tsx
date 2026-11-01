@@ -117,9 +117,9 @@ export default function AgentConsolePage() {
     }
   }
 
-  const rotate = async () => {
+  const rotate = async (skipConfirm = false) => {
     if (!a) return
-    if (!window.confirm('Rotate the API key? The current key stops working immediately.')) return
+    if (!skipConfirm && !window.confirm('Rotate the API key? The current key stops working immediately.')) return
     setBusy(true)
     try {
       const { data } = await api.post<{ api_key: string }>(`/agents/${a.id}/rotate-key`)
@@ -244,10 +244,33 @@ export default function AgentConsolePage() {
                 {a.status === 'active' ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                 {a.status === 'active' ? 'Pause' : 'Resume'}
               </button>
-              <button className="btn-secondary text-xs" onClick={rotate} disabled={busy}>
+              <button className="btn-secondary text-xs" onClick={() => rotate()} disabled={busy}>
                 <RefreshCw className="h-3.5 w-3.5" /> Rotate key
               </button>
             </div>
+          </div>
+
+          <div className="card p-5 border-brand/40 bg-brand/5">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles className="h-4 w-4 text-brand" />
+              <h3 className="font-semibold text-sm">Use this AI employee from any Claude</h3>
+            </div>
+            <p className="text-xs text-neutral-600 mb-3">
+              Flaire is an MCP connector. Share one link and the recipient's own Claude becomes{' '}
+              <strong>{a.name}</strong>: it can check its budget and request purchases through Flaire, and nothing
+              more. Approvals stay here, with you.
+            </p>
+            <ol className="text-xs text-neutral-700 space-y-1 mb-3 list-decimal list-inside">
+              <li>Click <strong>Get connect link</strong> (this rotates the key, so the old link stops working).</li>
+              <li>Send the link. They open Claude, Settings, Connectors, Add custom connector, paste it.</li>
+              <li>They ask their Claude: "Set up a Google Ads campaign for about SAR 500." You see it here.</li>
+            </ol>
+            <button className="btn-primary text-xs" onClick={() => rotate(true)} disabled={busy}>
+              Get connect link
+            </button>
+            <p className="text-[11px] text-neutral-500 mt-2 font-mono break-all">
+              {API_URL.replace(/\/$/, '')}/mcp/{a.key_prefix}...
+            </p>
           </div>
 
           <div className="card p-5">

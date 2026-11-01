@@ -147,3 +147,19 @@ def test_audit_chain_intact(ctx):
     assert v["ok"] and v["entries"] > 10
     events = {e["event"] for e in client.get("/api/v1/audit?limit=500", headers=ctx["H"]).json()}
     assert {"purchase.requested", "decision.approved", "decision.denied", "payment.settled", "kill_switch.on", "approval.approved"} <= events
+
+
+def test_mcp_connector(ctx):
+    import json as _json
+    key = ctx["A"]["X-Agent-Key"]
+    url = f"/api/v1/mcp/{key}"
+    init = client.post(url, json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}}).json()
+    assert init["result"]["serverInfo"]["name"] == "flaire"
+    assert client.post(url, json={"jsonrpc": "2.0", "method": "notifications/initialized"}).status_code == 202
+    tools = client.post(url, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).json()["result"]["tools"]
+    assert {t["name"] for t in tools} == {"check_budget", "request_purchase", "get_purchase_status", "list_my_requests"}
+    r = client.post(url, json={"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "request_purchase", "arguments": {"amount_sar": 5, "merchant": "Google Ads", "category": "advertising", "description": "mcp"}}}).json()
+    body = _json.loads(r["result"]["content"][0]["text"])
+    assert body["status"] == "completed" and r["result"]["isError"] is False
+    assert client.post("/api/v1/mcp/flk_nope", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}).status_code == 401
+    assert "approve" not in " ".join(t["name"] for t in tools)

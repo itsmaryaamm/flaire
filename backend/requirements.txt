@@ -11,3 +11,4 @@ anthropic>=0.40
 pyyaml>=6.0
 pytest>=8.0
 pydantic[email]>=2.8
+mcp>=1.0   # only needed for tests/tools that use the official client; the server itself has no extra deps

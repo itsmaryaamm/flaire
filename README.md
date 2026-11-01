@@ -53,12 +53,22 @@ cd backend && python -m pytest -q                      # 12 end-to-end tests: mi
 
 Without `ANTHROPIC_API_KEY` the agent runs a deterministic "scripted" plan through the same pipeline, so the demo always works. With the key set, a real Claude model plans and calls the tools.
 
+## Use Flaire from anyone's Claude (MCP connector)
+
+Every AI employee has a shareable connector link: `https://<your-api>/api/v1/mcp/<agent_key>`.
+
+1. In the dashboard open an AI employee and click **Get connect link** (or copy it from the key-issued dialog when you create one).
+2. Send the link to anyone. In Claude they go to **Settings → Connectors → Add custom connector**, paste the link, done.
+3. Their Claude now has four tools: `check_budget`, `request_purchase`, `get_purchase_status`, `list_my_requests`. When they ask it to buy something, the request shows up in your dashboard with Flaire's decision. There is no approve tool, so a human in the dashboard stays in control. Rotate the key to revoke the link instantly.
+
+The endpoint speaks MCP Streamable HTTP (JSON responses, stateless), implemented in `backend/app/api/mcp.py`, so it also works with Claude Desktop, Claude Code (`claude mcp add --transport http flaire <link>`) and any other MCP client. The backend must be deployed (Render) for links to work outside your laptop.
+
 ## What's in the box
 
 | Piece | Where | Status |
 |---|---|---|
 | A. Business dashboard (agents, budgets, cards, approvals, transactions, kill switch, audit) | `frontend/` | built |
-| B. Real Claude AI employees (Marketing, Procurement, Operations) with `check_budget` and `request_purchase` tools, no self-approval possible | `backend/app/agents/runner.py` | built |
+| B. Real Claude AI employees (Marketing, Procurement, Operations) with `check_budget` and `request_purchase` tools, no self-approval possible. Also exposed as an MCP connector so anyone's Claude can be an employee | `backend/app/agents/runner.py`, `backend/app/api/mcp.py` | built |
 | C. Spending authorization engine, Shotoku evaluated and integrated | `backend/app/integrations/shotoku/` | built, two engines |
 | D. Mock Saudi banks (SNB, Al Rajhi, Riyad Bank) with SAR balances | `backend/app/integrations/payments/mock_bank.py` | built, primary demo rail |
 | E. Lithic sandbox adapter (virtual cards, simulated authorization + clearing) | `backend/app/integrations/payments/lithic.py` | built, needs a sandbox key |
