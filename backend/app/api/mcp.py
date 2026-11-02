@@ -156,7 +156,9 @@ async def mcp_get(agent_key: str, db: Session = Depends(get_db)):
     agent = _agent_from_key(db, agent_key)
     if not agent:
         return JSONResponse({"detail": "Unknown Flaire agent key"}, status_code=401)
-    return JSONResponse({"name": "flaire", "agent": agent.name, "hint": "Add this URL as a custom connector in Claude. It speaks MCP over POST."}, status_code=405)
+    company = db.get(Company, agent.company_id)
+    return JSONResponse({"ok": True, "name": "flaire", "company": company.name, "agent": agent.name,
+                         "message": "This link works. Add it in Claude: Settings, Connectors, Add custom connector."})
 
 
 @router.delete("/mcp/{agent_key}", include_in_schema=False)
