@@ -21,6 +21,10 @@ class Company(Base):
     kill_switch: Mapped[bool] = mapped_column(Boolean, default=False)
     kill_switch_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     engine: Mapped[str] = mapped_column(String(20), default="native")  # native | shotoku
+    # Security controls (server-enforced, never by the AI)
+    require_password_on_approve: Mapped[bool] = mapped_column(Boolean, default=True)
+    two_person_threshold: Mapped[int] = mapped_column(Integer, default=250_000)  # halalas; approvals at/above need 2 different humans
+    kill_switch_frozen_cards: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     users: Mapped[list[User]] = relationship(back_populates="company")
@@ -77,6 +81,7 @@ class Agent(Base):
     blocked_merchants: Mapped[list] = mapped_column(JSON, default=list)
     max_requests_per_hour: Mapped[int] = mapped_column(Integer, default=10)
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    key_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # connector link expiry
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     company: Mapped[Company] = relationship(back_populates="agents")
@@ -171,3 +176,14 @@ class AuditEntry(Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     prev_hash: Mapped[str] = mapped_column(String(80))
     hash: Mapped[str] = mapped_column(String(80))
+
+
+class WebhookEvent(Base):
+    """Processed provider webhooks, keyed by the provider's event id so duplicate deliveries are ignored."""
+    __tablename__ = "webhook_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    provider: Mapped[str] = mapped_column(String(30), index=True)
+    event_id: Mapped[str] = mapped_column(String(120), index=True)
+    event_type: Mapped[str] = mapped_column(String(120))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

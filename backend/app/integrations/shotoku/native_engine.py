@@ -84,7 +84,13 @@ class NativeEngine:
         if a.requests_last_hour >= a.max_requests_per_hour:
             return self._deny(req, "velocity", reasons + [f"Agent hit its velocity limit ({a.max_requests_per_hour} requests/hour)."])
 
-        # 5. Human-in-the-loop threshold
+        # 5. Duplicate detection: same merchant and amount within 10 minutes looks like a loop or a replay. A human decides.
+        if a.duplicate_recent:
+            reasons.append(f"Possible duplicate: {sar(req.amount)} at {req.merchant} was already requested in the last 10 minutes. Human approval required.")
+            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="duplicate-purchase",
+                            summary=f"Held for approval: looks like a duplicate of a recent request at {req.merchant}.", decision_id=f"dec_{req.request_id}")
+
+        # 6. Human-in-the-loop threshold
         if req.amount >= a.approval_threshold:
             reasons.append(f"{sar(req.amount)} is at or above the approval threshold ({sar(a.approval_threshold)}). Human approval required.")
             return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="approval-threshold",

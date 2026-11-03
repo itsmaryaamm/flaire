@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from datetime import timedelta as _td
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.agents.runner import run_agent_task
 from app.api.serializers import agent_out, department_out, purchase_out, transaction_out
-from app.core import audit
+from app.core import audit, guard
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.core.security import create_access_token, generate_agent_key, get_current_agent, get_current_user, hash_password, require_approver, verify_password
@@ -44,7 +46,8 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
 
 
 @router.post("/auth/login", response_model=AuthOut, tags=["auth"])
-def login(body: LoginIn, db: Session = Depends(get_db)):
+def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
+    guard.check_rate(f"login:{guard.client_ip(request)}", limit=guard.LOGIN_LIMIT_PER_15_MIN, window=900)
     user = db.query(User).filter(User.email == body.email.lower()).first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "Invalid email or password")
@@ -71,6 +74,11 @@ def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db
     if body.engine:
         c.engine = body.engine
         audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="engine.changed", details={"engine": body.engine})
+    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold")}
+    for k, v in sec.items():
+        setattr(c, k, v)
+    if sec:
+        audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="security.updated", details=sec)
     db.commit()
     db.refresh(c)
     return c
@@ -147,7 +155,9 @@ def list_agents(user: User = Depends(get_current_user), db: Session = Depends(ge
 def create_agent(body: AgentIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
     _dept(db, user, body.department_id)
     plain, h, prefix = generate_agent_key()
-    a = Agent(company_id=user.company_id, api_key_hash=h, key_prefix=prefix, **body.model_dump())
+    fields = body.model_dump()
+    days = fields.pop("key_expires_in_days", None)
+    a = Agent(company_id=user.company_id, api_key_hash=h, key_prefix=prefix, key_expires_at=(datetime.now(timezone.utc) + _td(days=days)) if days else None, **fields)
     db.add(a)
     db.flush()
     audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.created", details={"id": a.id, "name": a.name, "role": a.role})
@@ -165,6 +175,10 @@ def get_agent(agent_id: int, user: User = Depends(get_current_user), db: Session
 def patch_agent(agent_id: int, body: AgentPatch, user: User = Depends(require_approver), db: Session = Depends(get_db)):
     a = _agent(db, user, agent_id)
     changes = body.model_dump(exclude_none=True)
+    if "key_expires_in_days" in changes:
+        days = changes.pop("key_expires_in_days")
+        a.key_expires_at = (datetime.now(timezone.utc) + _td(days=days)) if days else None
+        changes["key_expires_at"] = a.key_expires_at.isoformat() if a.key_expires_at else None
     if "department_id" in changes:
         _dept(db, user, changes["department_id"])
     if "status" in changes and changes["status"] not in ("active", "paused"):
@@ -281,12 +295,12 @@ def list_approvals(user: User = Depends(get_current_user), db: Session = Depends
 
 @router.post("/approvals/{pr_id}/approve", response_model=PurchaseRequestOut, tags=["approvals"])
 def approve(pr_id: int, body: ApprovalIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
-    return purchase_out(resolve_approval(db, company_of(user, db), user, _pr(db, user, pr_id), True, body.note))
+    return purchase_out(resolve_approval(db, company_of(user, db), user, _pr(db, user, pr_id), True, body.note, body.password))
 
 
 @router.post("/approvals/{pr_id}/reject", response_model=PurchaseRequestOut, tags=["approvals"])
 def reject(pr_id: int, body: ApprovalIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
-    return purchase_out(resolve_approval(db, company_of(user, db), user, _pr(db, user, pr_id), False, body.note))
+    return purchase_out(resolve_approval(db, company_of(user, db), user, _pr(db, user, pr_id), False, body.note, body.password))
 
 
 @router.get("/transactions", response_model=list[TransactionOut], tags=["transactions"])

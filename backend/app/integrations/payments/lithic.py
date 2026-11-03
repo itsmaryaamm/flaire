@@ -3,20 +3,28 @@
 Tests a real card-issuer sandbox: creates virtual cards and simulates authorization + clearing events through
 Lithic's /simulate endpoints. This is a separate rail from the mock Saudi banks and is NOT presented as control
 over an existing Saudi bank card. Lithic sandbox amounts are USD cents; Flaire passes SAR halalas 1:1 for
-demonstration and labels the card accordingly.
+demonstration and labels the card accordingly. Not suitable for real money as is.
+
+Security notes
+  * Flaire never stores a card number (PAN). Only the Lithic card token is stored; the sandbox PAN needed by
+    /simulate/authorize is fetched at the moment of use and discarded.
+  * Card creation sends an Idempotency-Key so a retry cannot create two cards.
+  * Webhooks (see app/api/webhooks.py) are verified with the Standard Webhooks HMAC scheme Lithic uses, with a
+    5 minute timestamp window and duplicate-event protection.
 
 Needs LITHIC_API_KEY (sandbox key from https://dashboard.lithic.com). Without it every call declines with a
 clear reason, so the rest of Flaire keeps working.
 
 Endpoints used (https://docs.lithic.com):
-  POST /v1/cards                 create a VIRTUAL card
-  POST /v1/simulate/authorize    simulate a merchant authorization (needs the card PAN; sandbox returns it)
-  POST /v1/simulate/clearing     simulate clearing/settlement of that authorization
-  GET  /v1/cards/{token}         read card state
+  POST  /v1/cards                 create a VIRTUAL card (Idempotency-Key header)
+  GET   /v1/cards/{token}         read card state (sandbox returns pan)
+  PATCH /v1/cards/{token}         state OPEN | PAUSED
+  POST  /v1/simulate/authorize    simulate a merchant authorization
+  POST  /v1/simulate/clearing     simulate clearing/settlement
 """
 from __future__ import annotations
 
-import json
+import uuid
 
 import httpx
 
@@ -36,39 +44,50 @@ class LithicAdapter:
     def _client(self) -> httpx.Client:
         return httpx.Client(base_url=self.base, headers={"Authorization": self.settings.lithic_api_key or "", "Content-Type": "application/json"}, timeout=20)
 
+    # ---------------- cards ----------------
     def create_card(self, label: str, credit_limit: int, currency: str) -> dict:
         if not self.enabled:
             raise RuntimeError("LITHIC_API_KEY is not configured. Add a sandbox key to .env to create Lithic cards.")
         with self._client() as c:
-            r = c.post("/cards", json={"type": "VIRTUAL", "memo": label, "spend_limit": credit_limit, "spend_limit_duration": "MONTHLY", "state": "OPEN"})
+            r = c.post("/cards", headers={"Idempotency-Key": str(uuid.uuid4())},
+                       json={"type": "VIRTUAL", "memo": label[:50], "spend_limit": credit_limit, "spend_limit_duration": "MONTHLY", "state": "OPEN"})
             r.raise_for_status()
             data = r.json()
-        token = json.dumps({"token": data["token"], "pan": data.get("pan")})
-        return {"last4": data.get("last_four", "0000"), "provider_token": token, "available_balance": credit_limit}
+        # Store the token only. Never the PAN.
+        return {"last4": data.get("last_four", "0000"), "provider_token": data["token"], "available_balance": credit_limit}
 
-    def _ids(self, card: Card) -> dict:
-        try:
-            return json.loads(card.provider_token or "{}")
-        except json.JSONDecodeError:
-            return {}
+    def _pan(self, c: httpx.Client, card: Card) -> str | None:
+        r = c.get(f"/cards/{card.provider_token}")
+        if r.status_code >= 400:
+            return None
+        return r.json().get("pan")
 
+    def set_state(self, card: Card, state: str) -> None:
+        """OPEN or PAUSED. Used by the kill switch. A CLOSED card cannot be reopened, so Flaire never closes."""
+        if not self.enabled or not card.provider_token:
+            return
+        with self._client() as c:
+            r = c.patch(f"/cards/{card.provider_token}", json={"state": state})
+            r.raise_for_status()
+
+    # ---------------- payments ----------------
     def authorize(self, card: Card, amount: int, merchant: str, descriptor: str) -> PaymentResult:
         if not self.enabled:
             return PaymentResult(False, "declined", "lithic_disabled", "LITHIC_API_KEY not configured")
         if card.status != "active":
             return PaymentResult(False, "declined", "lithic_frozen", f"Card is {card.status}")
-        ids = self._ids(card)
-        if not ids.get("pan"):
-            return PaymentResult(False, "declined", "lithic_no_pan", "Card has no sandbox PAN stored")
         with self._client() as c:
-            r = c.post("/simulate/authorize", json={"descriptor": descriptor[:25] or merchant[:25], "pan": ids["pan"], "amount": amount})
-            data = r.json()
+            pan = self._pan(c, card)
+            if not pan:
+                return PaymentResult(False, "declined", "lithic_no_pan", "Could not read the sandbox card from Lithic")
+            r = c.post("/simulate/authorize", json={"descriptor": (descriptor or merchant)[:25], "pan": pan, "amount": amount})
+            del pan
+            data = r.json() if r.content else {}
             if r.status_code >= 400:
-                return PaymentResult(False, "declined", "lithic_error", data.get("message", "Lithic error"), raw=data)
+                return PaymentResult(False, "declined", "lithic_error", data.get("message", f"Lithic error {r.status_code}"), raw=data)
             auth_token = data.get("token", "")
             if not auth_token:
                 return PaymentResult(False, "declined", "lithic_no_token", "Lithic did not return an authorization token", raw=data)
-            # Clear it straight away so the demo shows a settled transaction.
             cr = c.post("/simulate/clearing", json={"token": auth_token, "amount": amount})
             settled = cr.status_code < 400
         card.available_balance = max(card.available_balance - amount, 0)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ShieldCheck, ShieldAlert, Cpu, Link2, ScrollText, Bot, User, Server } from 'lucide-react'
 import { api, errorMessage } from '../lib/api'
@@ -79,6 +79,21 @@ export default function SettingsPage() {
     }
   }
 
+  const [twoPerson, setTwoPerson] = useState<string>(String((company?.two_person_threshold ?? 250000) / 100))
+  useEffect(() => {
+    if (company) setTwoPerson(String(company.two_person_threshold / 100))
+  }, [company])
+
+  const saveSecurity = async (patch: Partial<Pick<Company, 'require_password_on_approve' | 'two_person_threshold'>>) => {
+    try {
+      const { data } = await api.patch<Company>('/company', patch)
+      setCompany(data)
+      toast.success('Security settings saved.')
+    } catch (err) {
+      toast.error(errorMessage(err))
+    }
+  }
+
   const setEngine = async (engine: Engine) => {
     if (!company || company.engine === engine) return
     setSavingEngine(true)
@@ -133,6 +148,51 @@ export default function SettingsPage() {
               <dd className="font-medium">{formatDate(company?.created_at, false)}</dd>
             </div>
           </dl>
+        </section>
+
+        <section className="card p-5">
+          <h3 className="font-semibold">Approval security</h3>
+          <p className="text-xs text-neutral-500 mt-0.5 mb-3">Enforced by the server on every approval, never by the AI.</p>
+          <label className="flex items-start gap-3 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={company?.require_password_on_approve ?? true}
+              onChange={(e) => saveSecurity({ require_password_on_approve: e.target.checked })}
+            />
+            <span>
+              <span className="font-medium">Password re-entry on every approval</span>
+              <span className="block text-xs text-neutral-500">A stolen session or an unlocked laptop cannot approve spending.</span>
+            </span>
+          </label>
+          <div className="mt-4">
+            <label className="label" htmlFor="two-person">Two-person rule from (SAR)</label>
+            <div className="flex gap-2">
+              <input
+                id="two-person"
+                className="input tnum sm:w-48"
+                type="number"
+                min={0}
+                step={100}
+                value={twoPerson}
+                onChange={(e) => setTwoPerson(e.target.value)}
+              />
+              <button
+                className="btn-secondary"
+                onClick={() => saveSecurity({ two_person_threshold: Math.round(Number(twoPerson) * 100) })}
+                disabled={Math.round(Number(twoPerson) * 100) === company?.two_person_threshold}
+              >
+                Save
+              </button>
+            </div>
+            <p className="text-xs text-neutral-500 mt-1">Approvals at or above this amount need two different humans before money moves. Set 0 to require it for everything.</p>
+          </div>
+          <ul className="mt-4 text-xs text-neutral-600 space-y-1 list-disc list-inside">
+            <li>Agent keys are hashed, shown once, rotatable, and can expire.</li>
+            <li>Agents and connector links are rate limited (60 requests per minute); repeated bad keys lock the sender out for 15 minutes.</li>
+            <li>No agent endpoint can approve, change a limit or touch a card. Payments require a signed, single-use receipt.</li>
+            <li>Every action is written to a hash-chained ledger (verify it below).</li>
+          </ul>
         </section>
 
         <section className="card p-5">

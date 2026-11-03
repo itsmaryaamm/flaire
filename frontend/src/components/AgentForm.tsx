@@ -16,6 +16,7 @@ interface FormState {
   allowed_categories: string
   blocked_merchants: string
   max_requests_per_hour: string
+  key_expires_in_days: string
 }
 
 const ROLES = ['marketing', 'operations', 'engineering', 'sales', 'finance', 'support', 'general']
@@ -31,6 +32,7 @@ function toForm(agent?: Agent | null, departments?: Department[]): FormState {
     allowed_categories: (agent?.allowed_categories ?? ['advertising', 'software']).join(', '),
     blocked_merchants: (agent?.blocked_merchants ?? ['Gift card']).join(', '),
     max_requests_per_hour: String(agent?.max_requests_per_hour ?? 10),
+    key_expires_in_days: '',
   }
 }
 
@@ -95,6 +97,7 @@ export function AgentForm({
       allowed_categories: splitList(form.allowed_categories),
       blocked_merchants: splitList(form.blocked_merchants),
       max_requests_per_hour: Number(form.max_requests_per_hour) || 0,
+      ...(form.key_expires_in_days !== '' ? { key_expires_in_days: Number(form.key_expires_in_days) } : {}),
     }
     setBusy(true)
     try {
@@ -190,6 +193,11 @@ export function AgentForm({
         <div>
           <label className="label">Max requests per hour</label>
           <input className="input tnum" type="number" min={0} value={form.max_requests_per_hour} onChange={set('max_requests_per_hour')} />
+        </div>
+        <div>
+          <label className="label">Connect link expires in (days)</label>
+          <input className="input tnum" type="number" min={0} max={365} value={form.key_expires_in_days} onChange={set('key_expires_in_days')} placeholder="never" />
+          <p className="text-xs text-neutral-400 mt-1">Blank keeps the current setting. 0 removes expiry.</p>
         </div>
       </div>
 

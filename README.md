@@ -111,11 +111,15 @@ frontend/                          React + Vite + Tailwind dashboard
 docs/API.md                        API contract
 ```
 
-**Security model**
+**Security model** (full table in `docs/SECURITY.md`)
 - Humans use JWT. Agents use `X-Agent-Key` (stored hashed, shown once, rotatable). Agent keys only work on `/agent/*` routes: there is no endpoint an agent can call to approve, change a limit, or touch a card.
 - The engine fails closed. A sidecar outage, a malformed policy or an internal error is a denial.
 - Payment needs a signed receipt bound to agent + merchant + amount with a 5-minute TTL. A tampered or replayed receipt is rejected before any adapter is called.
-- Kill switch denies all new requests and freezes approvals until lifted.
+- Approvals need password re-entry; amounts at or above the company's two-person threshold need two different humans.
+- Kill switch denies all new requests, freezes approvals and pauses every card (Lithic cards are PAUSED at the issuer) until lifted.
+- Rate limits and bad-key lockout on agent and connector endpoints; connector links can expire.
+- Duplicate purchases go to a human. Budget rows are locked during payment.
+- Lithic webhooks are signature-verified (Standard Webhooks HMAC) with duplicate protection. No card numbers are stored.
 - Every event (request, decision, payment, approval, kill switch, key rotation) is appended to a hash-chained ledger; `GET /audit/verify` detects tampering.
 
 ## Deploy

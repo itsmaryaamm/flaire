@@ -26,6 +26,7 @@ class AgentPolicy:
     blocked_merchants: list[str] = field(default_factory=list)
     max_requests_per_hour: int = 10
     requests_last_hour: int = 0
+    duplicate_recent: bool = False   # same merchant + amount from this agent in the last 10 minutes
 
 
 @dataclass

@@ -39,3 +39,27 @@ def get_db() -> Generator[Session, None, None]:
 def init_db() -> None:
     from app import models  # noqa: F401  (register tables)
     Base.metadata.create_all(bind=engine)
+    _migrate()
+
+
+# Columns added after the first release. create_all() does not alter existing tables, so add them here.
+_NEW_COLUMNS = {
+    "companies": [("require_password_on_approve", "BOOLEAN DEFAULT 1"), ("two_person_threshold", "INTEGER DEFAULT 250000"), ("kill_switch_frozen_cards", "JSON NULL")],
+    "agents": [("key_expires_at", "TIMESTAMP NULL")],
+}
+
+
+def _migrate() -> None:
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    is_pg = engine.dialect.name == "postgresql"
+    with engine.begin() as conn:
+        for table, cols in _NEW_COLUMNS.items():
+            if table not in insp.get_table_names():
+                continue
+            existing = {c["name"] for c in insp.get_columns(table)}
+            for name, ddl in cols:
+                if name in existing:
+                    continue
+                ddl_pg = ddl.replace("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE").replace("TIMESTAMP NULL", "TIMESTAMPTZ NULL")
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_pg if is_pg else ddl}"))

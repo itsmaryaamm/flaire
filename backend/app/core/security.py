@@ -4,11 +4,12 @@ from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import jwt
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core import guard
 from app.core.db import get_db
 from app.models import Agent, User
 
@@ -64,10 +65,21 @@ def hash_api_key(plain: str) -> str:
     return hashlib.sha256(plain.encode()).hexdigest()
 
 
-def get_current_agent(x_agent_key: str | None = Header(default=None), db: Session = Depends(get_db)) -> Agent:
+def resolve_agent_key(db: Session, key: str, request: Request | None = None) -> Agent:
+    """Shared by the X-Agent-Key routes and the MCP connector. Enforces lockout, expiry, status and rate limit."""
+    ip = guard.client_ip(request) if request else "unknown"
+    guard.check_ip_locked(ip)
+    agent = db.query(Agent).filter(Agent.api_key_hash == hash_api_key(key)).first() if key else None
+    if not agent:
+        guard.record_bad_key(ip)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Unknown agent key")
+    if agent.key_expires_at and agent.key_expires_at.replace(tzinfo=agent.key_expires_at.tzinfo or timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "This agent key has expired. Ask the company to issue a new connect link.")
+    guard.check_rate(f"agent:{agent.id}")
+    return agent
+
+
+def get_current_agent(request: Request, x_agent_key: str | None = Header(default=None), db: Session = Depends(get_db)) -> Agent:
     if not x_agent_key:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing X-Agent-Key header")
-    agent = db.query(Agent).filter(Agent.api_key_hash == hash_api_key(x_agent_key)).first()
-    if not agent:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Unknown agent key")
-    return agent
+    return resolve_agent_key(db, x_agent_key, request)

@@ -24,6 +24,7 @@ function ApprovalCard({
 }) {
   const toast = useToast()
   const [note, setNote] = useState('')
+  const [password, setPassword] = useState('')
   const [busy, setBusy] = useState<'approve' | 'reject' | null>(null)
   const [result, setResult] = useState<PurchaseRequest | null>(null)
 
@@ -32,7 +33,14 @@ function ApprovalCard({
     try {
       const { data } = await api.post<PurchaseRequest>(`/approvals/${req.id}/${action}`, {
         note: note.trim() || undefined,
+        password: password || undefined,
       })
+      setPassword('')
+      if (data.needs_second_approver && data.status === 'pending_approval') {
+        toast.success('First approval recorded. A second approver must confirm before money moves.')
+        onDone(data)
+        return
+      }
       setResult(data)
       toast.success(
         action === 'approve'
@@ -97,12 +105,29 @@ function ApprovalCard({
           )}
         </div>
       ) : (
-        <div className="mt-4 flex flex-col sm:flex-row gap-2">
+        <div className="mt-4 space-y-2">
+          {req.needs_second_approver && (
+            <div className="flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <Lock className="h-4 w-4 shrink-0" />
+              <span>
+                Two-person rule. First approval by <strong>{req.approvals[0]?.full_name}</strong>. A different approver must confirm.
+              </span>
+            </div>
+          )}
+          <div className="flex flex-col sm:flex-row gap-2">
           <input
             className="input flex-1"
             placeholder="Optional note for the ledger"
             value={note}
             onChange={(e) => setNote(e.target.value)}
+          />
+          <input
+            className="input sm:w-56"
+            type="password"
+            autoComplete="current-password"
+            placeholder="Your password to confirm"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
           />
           <div className="flex gap-2">
             <button className="btn-secondary text-red-700 border-red-200 hover:bg-red-50" onClick={() => act('reject')} disabled={busy !== null}>
@@ -121,6 +146,7 @@ function ApprovalCard({
                 </span>
               )}
             </span>
+          </div>
           </div>
         </div>
       )}
@@ -174,6 +200,10 @@ export default function ApprovalsPage() {
               req={r}
               killSwitch={killSwitch}
               onDone={(res) => {
+                if (res.needs_second_approver && res.status === 'pending_approval') {
+                  void pending.refetch()
+                  return
+                }
                 setDone((d) => [res, ...d])
                 // refetch after a moment so the user sees the result status first
                 window.setTimeout(() => void pending.refetch(), 1200)

@@ -21,6 +21,7 @@ from app.core.config import get_settings
 from app.integrations.payments import get_adapter
 from app.integrations.shotoku import get_engine
 from app.integrations.shotoku.interface import AgentPolicy, AuthorizationRequest, Decision, DepartmentBudget
+from app.integrations.shotoku.native_engine import sar
 from app.models import Agent, Card, Company, Department, PurchaseRequest, Transaction, User, utcnow
 
 settings = get_settings()
@@ -44,13 +45,17 @@ def build_authorization_request(db: Session, company: Company, agent: Agent, pr:
     dept = db.get(Department, agent.department_id)
     one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
     recent = (db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id, PurchaseRequest.created_at >= one_hour_ago, PurchaseRequest.id != pr.id).count())
+    ten_min_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
+    duplicate = (db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id, PurchaseRequest.id != pr.id, PurchaseRequest.created_at >= ten_min_ago,
+                                                  PurchaseRequest.merchant == pr.merchant, PurchaseRequest.amount == pr.amount,
+                                                  PurchaseRequest.status.in_(["completed", "approved", "pending_approval"])).count() > 0)
     return AuthorizationRequest(
         request_id=str(pr.id), company_id=company.id, amount=pr.amount, currency=pr.currency, merchant=pr.merchant, category=pr.category,
         description=pr.description or "",
         agent=AgentPolicy(agent_id=agent.id, agent_name=agent.name, status=agent.status, per_transaction_limit=agent.per_transaction_limit,
                           monthly_limit=agent.monthly_limit, spent_this_period=agent.spent_this_period, approval_threshold=agent.approval_threshold,
                           allowed_categories=list(agent.allowed_categories or []), blocked_merchants=list(agent.blocked_merchants or []),
-                          max_requests_per_hour=agent.max_requests_per_hour, requests_last_hour=recent),
+                          max_requests_per_hour=agent.max_requests_per_hour, requests_last_hour=recent, duplicate_recent=duplicate),
         department=DepartmentBudget(department_id=dept.id, name=dept.name, monthly_budget=dept.monthly_budget, spent_this_period=dept.spent_this_period),
         kill_switch=company.kill_switch,
     )
@@ -60,7 +65,8 @@ def decision_to_dict(d: Decision) -> dict:
     return {"verdict": d.verdict, "engine": d.engine, "reasons": d.reasons, "rule_id": d.rule_id, "receipt": d.receipt, "summary": d.summary, "decision_id": d.decision_id}
 
 
-def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amount: int, merchant: str, category: str, description: str, card_id: int | None) -> PurchaseRequest:
+def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amount: int, merchant: str, category: str, description: str, card_id: int | None,
+                            source: str = "api", client_ip: str | None = None) -> PurchaseRequest:
     ensure_period(db, company)
     pr = PurchaseRequest(company_id=company.id, agent_id=agent.id, department_id=agent.department_id, card_id=card_id, amount=amount,
                          currency=company.currency, merchant=merchant.strip(), category=category.strip().lower(), description=description or "", status="pending_approval")
@@ -68,7 +74,7 @@ def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amou
     db.flush()
     agent.last_active_at = utcnow()
     audit.record(db, company.id, actor_type="agent", actor_id=agent.id, actor_name=agent.name, event="purchase.requested",
-                 details={"request_id": pr.id, "amount": amount, "merchant": merchant, "category": category})
+                 details={"request_id": pr.id, "amount": amount, "merchant": merchant, "category": category, "source": source, "ip": client_ip})
 
     engine = get_engine(company.engine or settings.auth_engine)
     decision = engine.authorize(build_authorization_request(db, company, agent, pr))
@@ -118,6 +124,14 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
         audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.failed", details={"request_id": pr.id, "reason": "no card"})
         return None
 
+    # Lock the budget and card rows so two agents paying at the same instant cannot both pass the same remaining balance.
+    dept = db.query(Department).filter(Department.id == pr.department_id).with_for_update().one()
+    card = db.query(Card).filter(Card.id == card.id).with_for_update().one()
+    if pr.amount > dept.remaining:
+        pr.status = "failed"
+        pr.decision = {**pr.decision, "payment_error": "Budget was consumed by a concurrent purchase."}
+        audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.rejected", details={"request_id": pr.id, "reasons": ["concurrent budget exhaustion"]})
+        return None
     adapter = get_adapter(card.provider)
     result = adapter.authorize(card, pr.amount, pr.merchant, f"FLAIRE*{pr.merchant}")
     tx = Transaction(company_id=company.id, purchase_request_id=pr.id, card_id=card.id, provider=card.provider, provider_ref=result.provider_ref,
@@ -127,7 +141,6 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
     pr.transaction_id = tx.id
     if result.ok:
         pr.status = "completed"
-        dept = db.get(Department, pr.department_id)
         dept.spent_this_period += pr.amount
         agent.spent_this_period += pr.amount
         audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.settled",
@@ -141,22 +154,54 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
 
 
 # ---------------- human approvals ----------------
-def resolve_approval(db: Session, company: Company, user: User, pr: PurchaseRequest, approve: bool, note: str | None) -> PurchaseRequest:
+def resolve_approval(db: Session, company: Company, user: User, pr: PurchaseRequest, approve: bool, note: str | None, password: str | None = None) -> PurchaseRequest:
+    """Human approval with server-enforced security rules:
+      1. password re-entry (company.require_password_on_approve)
+      2. two-person rule at/above company.two_person_threshold: two different humans must approve
+      3. kill switch freezes approvals; budgets and limits are re-checked by the engine at approval time
+    """
+    from app.core.security import verify_password
+
     if pr.status != "pending_approval":
         raise HTTPException(409, f"Request is {pr.status}, not pending approval")
     if company.kill_switch and approve:
         raise HTTPException(409, "Kill switch is ON. Lift it before approving any spending.")
+    if company.require_password_on_approve:
+        if not password or not verify_password(password, user.password_hash):
+            audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="approval.password_failed", details={"request_id": pr.id})
+            db.commit()
+            raise HTTPException(403, "Password confirmation failed. Re-enter your password to approve or reject.")
+
     ensure_period(db, company)
+    decision_meta = dict(pr.decision or {})
+    approvals: list[dict] = list(decision_meta.get("approvals", []))
+
+    # Two-person rule: first approval is recorded, money moves only after a second, different human approves.
+    if approve and pr.amount >= company.two_person_threshold:
+        if any(a["id"] == user.id for a in approvals):
+            raise HTTPException(409, "You already approved this. A different approver must give the second approval.")
+        approvals.append({"id": user.id, "full_name": user.full_name})
+        audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="approval.first_of_two" if len(approvals) == 1 else "approval.second_of_two",
+                     details={"request_id": pr.id, "note": note, "threshold": company.two_person_threshold})
+        if len(approvals) < 2:
+            pr.decision = {**decision_meta, "approvals": approvals, "needs_second_approver": True,
+                           "reasons": decision_meta.get("reasons", []) + [f"First approval by {user.full_name}. Amount is at or above the two-person threshold ({sar(company.two_person_threshold)}); a second approver is required."]}
+            pr.approval_note = note
+            db.commit()
+            db.refresh(pr)
+            return pr
+        decision_meta = {**decision_meta, "approvals": approvals, "needs_second_approver": False}
+
     agent = db.get(Agent, pr.agent_id)
-    engine = get_engine(pr.decision.get("engine") or company.engine)
+    engine = get_engine(decision_meta.get("engine") or company.engine)
     auth_req = build_authorization_request(db, company, agent, pr)
-    decision_id = pr.decision.get("decision_id")
+    decision_id = decision_meta.get("decision_id")
     decision = engine.approve(auth_req, decision_id, user.full_name) if approve else engine.deny(auth_req, decision_id, user.full_name)
 
     pr.approved_by_id = user.id
     pr.approval_note = note
     pr.decided_at = utcnow()
-    pr.decision = {**pr.decision, **decision_to_dict(decision), "reasons": pr.decision.get("reasons", []) + decision.reasons}
+    pr.decision = {**decision_meta, **decision_to_dict(decision), "approvals": approvals, "reasons": decision_meta.get("reasons", []) + decision.reasons}
     audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name,
                  event="approval.approved" if approve else "approval.rejected", details={"request_id": pr.id, "note": note})
 
@@ -172,10 +217,34 @@ def resolve_approval(db: Session, company: Company, user: User, pr: PurchaseRequ
 
 # ---------------- kill switch ----------------
 def set_kill_switch(db: Session, company: Company, user: User, enabled: bool, reason: str | None) -> Company:
+    """Company-wide emergency stop. Besides denying new requests and freezing approvals, it pauses every active card
+    (Lithic cards are PAUSED at the issuer) and restores exactly those cards when lifted."""
     company.kill_switch = enabled
     company.kill_switch_reason = reason if enabled else None
+    frozen_ids: list[int] = []
+    if enabled:
+        for card in db.query(Card).filter(Card.company_id == company.id, Card.status == "active").all():
+            card.status = "frozen"
+            frozen_ids.append(card.id)
+            if card.provider == "lithic":
+                try:
+                    get_adapter("lithic").set_state(card, "PAUSED")
+                except Exception as exc:  # issuer unreachable: Flaire's own freeze still blocks payment
+                    audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="card.pause_failed", details={"card_id": card.id, "error": str(exc)})
+        company.kill_switch_frozen_cards = frozen_ids
+    else:
+        for cid in list(company.kill_switch_frozen_cards or []):
+            card = db.get(Card, cid)
+            if card and card.status == "frozen":
+                card.status = "active"
+                if card.provider == "lithic":
+                    try:
+                        get_adapter("lithic").set_state(card, "OPEN")
+                    except Exception as exc:
+                        audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="card.unpause_failed", details={"card_id": card.id, "error": str(exc)})
+        company.kill_switch_frozen_cards = []
     audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name,
-                 event="kill_switch.on" if enabled else "kill_switch.off", details={"reason": reason})
+                 event="kill_switch.on" if enabled else "kill_switch.off", details={"reason": reason, "cards_frozen": frozen_ids if enabled else None})
     db.commit()
     db.refresh(company)
     return company

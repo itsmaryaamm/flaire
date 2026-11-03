@@ -16,6 +16,8 @@ export interface Company {
   currency: 'SAR'
   kill_switch: boolean
   engine: Engine
+  require_password_on_approve: boolean
+  two_person_threshold: number
   created_at: string
 }
 
@@ -52,7 +54,9 @@ export interface Agent {
   allowed_categories: string[]
   blocked_merchants: string[]
   max_requests_per_hour: number
+  key_expires_in_days?: number | null
   key_prefix: string
+  key_expires_at?: string | null
   last_active_at: string | null
   created_at: string
 }
@@ -67,6 +71,7 @@ export interface AgentCreateInput {
   allowed_categories: string[]
   blocked_merchants: string[]
   max_requests_per_hour: number
+  key_expires_in_days?: number | null
 }
 
 export type AgentUpdateInput = Partial<AgentCreateInput> & { status?: AgentStatus }
@@ -110,6 +115,8 @@ export interface PurchaseRequest {
   decision: Decision | null
   transaction_id: number | null
   approved_by: { id: number; full_name: string } | null
+  approvals: { id: number; full_name: string }[]
+  needs_second_approver: boolean
   created_at: string
   decided_at: string | null
 }

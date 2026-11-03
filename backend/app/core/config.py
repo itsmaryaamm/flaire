@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # Lithic sandbox (optional). Get a sandbox key at https://dashboard.lithic.com
     lithic_api_key: str | None = None
     lithic_base_url: str = "https://sandbox.lithic.com/v1"
+    lithic_webhook_secret: str | None = None  # "whsec_..." from the Lithic dashboard webhook settings
 
     @property
     def cors_origin_list(self) -> list[str]:

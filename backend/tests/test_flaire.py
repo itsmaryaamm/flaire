@@ -88,7 +88,10 @@ def test_needs_approval_then_approve(ctx):
     assert client.post(f"/api/v1/approvals/{pr['id']}/approve", json={}, headers=ctx["A"]).status_code == 401
     pending = client.get("/api/v1/approvals", headers=ctx["H"]).json()
     assert [p["id"] for p in pending] == [pr["id"]]
-    done = client.post(f"/api/v1/approvals/{pr['id']}/approve", json={"note": "ok for launch"}, headers=ctx["H"]).json()
+    # password re-entry is enforced server-side
+    assert client.post(f"/api/v1/approvals/{pr['id']}/approve", json={"note": "x"}, headers=ctx["H"]).status_code == 403
+    assert client.post(f"/api/v1/approvals/{pr['id']}/approve", json={"note": "x", "password": "wrong"}, headers=ctx["H"]).status_code == 403
+    done = client.post(f"/api/v1/approvals/{pr['id']}/approve", json={"note": "ok for launch", "password": "password123"}, headers=ctx["H"]).json()
     assert done["status"] == "completed" and done["approved_by"]["full_name"] == "Owner"
     assert client.get("/api/v1/approvals", headers=ctx["H"]).json() == []
 
@@ -96,15 +99,15 @@ def test_needs_approval_then_approve(ctx):
 def test_reject(ctx):
     pr = buy(ctx, 100_000, merchant="TikTok Ads")
     assert pr["status"] == "pending_approval"
-    out = client.post(f"/api/v1/approvals/{pr['id']}/reject", json={"note": "no"}, headers=ctx["H"]).json()
+    out = client.post(f"/api/v1/approvals/{pr['id']}/reject", json={"note": "no", "password": "password123"}, headers=ctx["H"]).json()
     assert out["status"] == "rejected"
     assert client.get("/api/v1/cards", headers=ctx["H"]).json()[0]["available_balance"] == 1_000_000 - 150_000
 
 
 def test_department_budget_enforced(ctx):
     # Spent so far: 50k + 100k = 150k of 500k. Agent monthly limit 400k. Ask for 99k x 3 then one more that busts the dept budget.
-    for _ in range(2):
-        assert buy(ctx, 99_000)["status"] == "completed"
+    for merchant in ("Meta Ads", "LinkedIn Ads"):
+        assert buy(ctx, 99_000, merchant=merchant)["status"] == "completed"
     # spent 348k, agent limit 400k leaves 52k; dept remaining 152k. 60k → agent-monthly-limit
     pr = buy(ctx, 60_000)
     assert pr["status"] == "denied" and pr["decision"]["rule_id"] == "agent-monthly-limit"
@@ -163,3 +166,120 @@ def test_mcp_connector(ctx):
     assert body["status"] == "completed" and r["result"]["isError"] is False
     assert client.post("/api/v1/mcp/flk_nope", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}).status_code == 401
     assert "approve" not in " ".join(t["name"] for t in tools)
+
+
+def test_two_person_rule(ctx):
+    from app.core import guard
+    guard.reset()
+    H = ctx["H"]
+    # Raise limits so a SAR 3,000 request is possible, keep approval threshold so it goes pending.
+    client.patch(f"/api/v1/agents/{ctx['agent']['id']}", json={"per_transaction_limit": 500_000, "monthly_limit": 2_000_000}, headers=H)
+    client.patch("/api/v1/departments/%d" % ctx["dept"]["id"], json={"monthly_budget": 5_000_000}, headers=H)
+    pr = buy(ctx, 300_000, merchant="Snapchat Ads")
+    assert pr["status"] == "pending_approval"
+    first = client.post(f"/api/v1/approvals/{pr['id']}/approve", json={"password": "password123"}, headers=H).json()
+    assert first["status"] == "pending_approval" and first["needs_second_approver"] is True and len(first["approvals"]) == 1
+    # same person cannot give the second approval
+    assert client.post(f"/api/v1/approvals/{pr['id']}/approve", json={"password": "password123"}, headers=H).status_code == 409
+    # a second human can. Register one in the same company by inviting: for the test, create directly.
+    from app.core.db import SessionLocal
+    from app.core.security import hash_password
+    from app.models import User
+    db = SessionLocal()
+    u2 = User(company_id=db.query(User).filter(User.email == "owner@test.sa").first().company_id, email="finance@test.sa", full_name="Finance", password_hash=hash_password("password123"), role="finance")
+    db.add(u2); db.commit(); db.close()
+    tok2 = client.post("/api/v1/auth/login", json={"email": "finance@test.sa", "password": "password123"}).json()["access_token"]
+    second = client.post(f"/api/v1/approvals/{pr['id']}/approve", json={"password": "password123"}, headers={"Authorization": f"Bearer {tok2}"}).json()
+    assert second["status"] == "completed" and len(second["approvals"]) == 2
+
+
+def test_agent_key_cannot_reach_human_routes(ctx):
+    A = ctx["A"]
+    for path in ["/api/v1/approvals", "/api/v1/agents", "/api/v1/cards", "/api/v1/company", "/api/v1/dashboard/summary", "/api/v1/audit"]:
+        assert client.get(path, headers=A).status_code == 401, path
+    assert client.post("/api/v1/company/kill-switch", json={"enabled": False}, headers=A).status_code == 401
+    assert client.patch(f"/api/v1/agents/{ctx['agent']['id']}", json={"per_transaction_limit": 10**9}, headers=A).status_code == 401
+
+
+def test_bad_key_lockout_and_rate_limit(ctx):
+    from app.core import guard
+    guard.reset()
+    for _ in range(8):
+        client.get("/api/v1/agent/me", headers={"X-Agent-Key": "flk_bad"})
+    r = client.get("/api/v1/agent/me", headers={"X-Agent-Key": "flk_bad"})
+    assert r.status_code == 429 and "Locked out" in r.json()["detail"]
+    guard.reset()
+    for _ in range(60):
+        assert client.get("/api/v1/agent/me", headers=ctx["A"]).status_code == 200
+    assert client.get("/api/v1/agent/me", headers=ctx["A"]).status_code == 429
+    guard.reset()
+
+
+def test_key_expiry(ctx):
+    from app.core import guard
+    guard.reset()
+    H = ctx["H"]
+    dept = ctx["dept"]["id"]
+    made = client.post("/api/v1/agents", json={"name": "Temp AI", "role": "general", "department_id": dept, "key_expires_in_days": 1}, headers=H).json()
+    assert made["agent"]["key_expires_at"] is not None
+    assert client.get("/api/v1/agent/me", headers={"X-Agent-Key": made["api_key"]}).status_code == 200
+    from app.core.db import SessionLocal
+    from app.models import Agent
+    from datetime import datetime, timedelta, timezone
+    db = SessionLocal(); a = db.get(Agent, made["agent"]["id"]); a.key_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1); db.commit(); db.close()
+    r = client.get("/api/v1/agent/me", headers={"X-Agent-Key": made["api_key"]})
+    assert r.status_code == 401 and "expired" in r.json()["detail"]
+    r = client.post(f"/api/v1/mcp/{made['api_key']}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    assert r.status_code == 401
+
+
+def test_security_headers():
+    r = client.get("/api/v1/health")
+    assert r.headers["x-content-type-options"] == "nosniff" and r.headers["x-frame-options"] == "DENY"
+
+
+def test_kill_switch_freezes_cards_and_restores(ctx):
+    from app.core import guard
+    guard.reset()
+    H = ctx["H"]
+    client.post("/api/v1/company/kill-switch", json={"enabled": True, "reason": "drill"}, headers=H)
+    assert all(c["status"] == "frozen" for c in client.get("/api/v1/cards", headers=H).json())
+    client.post("/api/v1/company/kill-switch", json={"enabled": False}, headers=H)
+    assert all(c["status"] == "active" for c in client.get("/api/v1/cards", headers=H).json())
+
+
+def test_duplicate_purchase_goes_to_human(ctx):
+    from app.core import guard
+    guard.reset()
+    first = buy(ctx, 7_700, merchant="Canva", category="software")
+    assert first["status"] == "completed"
+    again = buy(ctx, 7_700, merchant="Canva", category="software")
+    assert again["status"] == "pending_approval" and again["decision"]["rule_id"] == "duplicate-purchase"
+
+
+def test_lithic_webhook_signature_and_dedupe():
+    import base64, hmac, hashlib, time, os
+    from app.api.webhooks import verify_standard_webhook
+    from fastapi import HTTPException
+    secret_raw = os.urandom(24)
+    secret = "whsec_" + base64.b64encode(secret_raw).decode()
+    body = b'{"event_type":"transaction.updated","payload":{"token":"nope","status":"SETTLED"}}'
+    ts = str(int(time.time()))
+    sig = base64.b64encode(hmac.new(secret_raw, f"m1.{ts}.".encode() + body, hashlib.sha256).digest()).decode()
+    headers = {"webhook-id": "m1", "webhook-timestamp": ts, "webhook-signature": f"v1,{sig}"}
+    assert verify_standard_webhook(body, headers, secret) == "m1"
+    try:
+        verify_standard_webhook(body + b" ", headers, secret); assert False
+    except HTTPException as e:
+        assert e.status_code == 401
+    try:
+        verify_standard_webhook(body, {**headers, "webhook-timestamp": str(int(time.time()) - 1000)}, secret); assert False
+    except HTTPException as e:
+        assert e.status_code == 400
+    # endpoint: configured secret, first delivery processed, second acknowledged as duplicate
+    from app.core.config import get_settings
+    get_settings().lithic_webhook_secret = secret
+    r1 = client.post("/api/v1/webhooks/lithic", content=body, headers={**headers, "content-type": "application/json"})
+    r2 = client.post("/api/v1/webhooks/lithic", content=body, headers={**headers, "content-type": "application/json"})
+    assert r1.status_code == 200 and r1.json()["ok"] and not r1.json().get("duplicate")
+    assert r2.json().get("duplicate") is True
