@@ -74,7 +74,9 @@ def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db
     if body.engine:
         c.engine = body.engine
         audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="engine.changed", details={"engine": body.engine})
-    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold")}
+    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from")}
+    if "trusted_merchants" in sec:
+        sec["trusted_merchants"] = [m.strip() for m in sec["trusted_merchants"] if m.strip()][:200]
     for k, v in sec.items():
         setattr(c, k, v)
     if sec:

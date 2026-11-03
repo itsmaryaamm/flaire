@@ -84,7 +84,16 @@ export default function SettingsPage() {
     if (company) setTwoPerson(String(company.two_person_threshold / 100))
   }, [company])
 
-  const saveSecurity = async (patch: Partial<Pick<Company, 'require_password_on_approve' | 'two_person_threshold'>>) => {
+  const [trusted, setTrusted] = useState<string>((company?.trusted_merchants ?? []).join(', '))
+  const [newMerchant, setNewMerchant] = useState<string>(String((company?.new_merchant_review_from ?? 20000) / 100))
+  useEffect(() => {
+    if (company) {
+      setTrusted((company.trusted_merchants ?? []).join(', '))
+      setNewMerchant(String(company.new_merchant_review_from / 100))
+    }
+  }, [company])
+
+  const saveSecurity = async (patch: Partial<Pick<Company, 'require_password_on_approve' | 'two_person_threshold' | 'trusted_merchants' | 'new_merchant_review_from'>>) => {
     try {
       const { data } = await api.patch<Company>('/company', patch)
       setCompany(data)
@@ -148,6 +157,38 @@ export default function SettingsPage() {
               <dd className="font-medium">{formatDate(company?.created_at, false)}</dd>
             </div>
           </dl>
+        </section>
+
+        <section className="card p-5">
+          <h3 className="font-semibold">Supplier policy</h3>
+          <p className="text-xs text-neutral-500 mt-0.5 mb-3">
+            How a finance team actually works: trusted suppliers get paid within limits, unknown suppliers get a look first.
+          </p>
+          <label className="label" htmlFor="trusted">Trusted suppliers</label>
+          <textarea
+            id="trusted"
+            className="input min-h-[72px]"
+            placeholder="Google Ads, Canva, Aramex"
+            value={trusted}
+            onChange={(e) => setTrusted(e.target.value)}
+          />
+          <p className="text-xs text-neutral-500 mt-1 mb-3">Comma separated. Purchases at these suppliers skip the category check (limits and thresholds still apply).</p>
+          <label className="label" htmlFor="newm">Review first payment to a new supplier from (SAR)</label>
+          <div className="flex gap-2">
+            <input id="newm" className="input tnum sm:w-48" type="number" min={0} step={50} value={newMerchant} onChange={(e) => setNewMerchant(e.target.value)} />
+            <button
+              className="btn-secondary"
+              onClick={() =>
+                saveSecurity({
+                  trusted_merchants: trusted.split(',').map((m) => m.trim()).filter(Boolean),
+                  new_merchant_review_from: Math.round(Number(newMerchant) * 100),
+                })
+              }
+            >
+              Save policy
+            </button>
+          </div>
+          <p className="text-xs text-neutral-500 mt-1">The first payment to a supplier the company has never paid waits for a human at or above this amount. 0 turns this off.</p>
         </section>
 
         <section className="card p-5">

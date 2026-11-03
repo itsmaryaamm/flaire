@@ -44,7 +44,8 @@ def init_db() -> None:
 
 # Columns added after the first release. create_all() does not alter existing tables, so add them here.
 _NEW_COLUMNS = {
-    "companies": [("require_password_on_approve", "BOOLEAN DEFAULT 1"), ("two_person_threshold", "INTEGER DEFAULT 250000"), ("kill_switch_frozen_cards", "JSON NULL")],
+    "companies": [("require_password_on_approve", "BOOLEAN DEFAULT 1"), ("two_person_threshold", "INTEGER DEFAULT 250000"), ("kill_switch_frozen_cards", "JSON NULL"),
+                  ("trusted_merchants", "JSON NULL"), ("new_merchant_review_from", "INTEGER DEFAULT 20000")],
     "agents": [("key_expires_at", "TIMESTAMP NULL")],
 }
 

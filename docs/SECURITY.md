@@ -15,6 +15,7 @@ Principle: the AI explains and requests. The server decides. Money moves only on
 | Rules re-evaluated at approval time (budget, kill switch) | engine.approve | test_kill_switch |
 | Kill switch: denies new requests, freezes approvals, pauses every card (Lithic PAUSED), restores on lift | services.set_kill_switch | test_kill_switch_freezes_cards_and_restores |
 | Duplicate purchase (same agent, merchant, amount within 10 min) goes to a human | native_engine | test_duplicate_purchase_goes_to_human |
+| Supplier policy: trusted suppliers skip category checks; first payment to a new supplier at/above a review amount waits for a human | native_engine, Settings | test_trusted_and_new_merchant_policy |
 | Budget and card rows locked during payment (SELECT FOR UPDATE on Postgres) | services.execute_payment | milestone test on SQLite; lock is Postgres-only |
 | Signed receipts bound to agent + merchant + amount, 5 min TTL, constant-time compare | integrations/shotoku/receipts.py | test_bad_key_and_tampered_receipt |
 | Hash-chained audit ledger with verify endpoint; records source and caller IP for agent requests | core/audit.py | test_audit_chain_intact |

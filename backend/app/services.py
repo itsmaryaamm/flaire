@@ -14,6 +14,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core import audit
@@ -49,8 +50,12 @@ def build_authorization_request(db: Session, company: Company, agent: Agent, pr:
     duplicate = (db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id, PurchaseRequest.id != pr.id, PurchaseRequest.created_at >= ten_min_ago,
                                                   PurchaseRequest.merchant == pr.merchant, PurchaseRequest.amount == pr.amount,
                                                   PurchaseRequest.status.in_(["completed", "approved", "pending_approval"])).count() > 0)
+    merchant_is_new = (db.query(PurchaseRequest).filter(PurchaseRequest.company_id == company.id, PurchaseRequest.id != pr.id,
+                                                        PurchaseRequest.status == "completed", func.lower(PurchaseRequest.merchant) == pr.merchant.lower()).count() == 0)
     return AuthorizationRequest(
-        request_id=str(pr.id), company_id=company.id, amount=pr.amount, currency=pr.currency, merchant=pr.merchant, category=pr.category,
+        request_id=str(pr.id), company_id=company.id,
+        company_trusted_merchants=list(company.trusted_merchants or []), merchant_is_new=merchant_is_new,
+        new_merchant_review_from=company.new_merchant_review_from, amount=pr.amount, currency=pr.currency, merchant=pr.merchant, category=pr.category,
         description=pr.description or "",
         agent=AgentPolicy(agent_id=agent.id, agent_name=agent.name, status=agent.status, per_transaction_limit=agent.per_transaction_limit,
                           monthly_limit=agent.monthly_limit, spent_this_period=agent.spent_this_period, approval_threshold=agent.approval_threshold,

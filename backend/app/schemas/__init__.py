@@ -45,6 +45,8 @@ class CompanyOut(BaseModel):
     engine: str
     require_password_on_approve: bool = True
     two_person_threshold: int = 250_000
+    trusted_merchants: list[str] = []
+    new_merchant_review_from: int = 20_000
     created_at: UtcDatetime
     model_config = {"from_attributes": True}
 
@@ -61,6 +63,8 @@ class CompanyPatch(BaseModel):
     engine: str | None = None
     require_password_on_approve: bool | None = None
     two_person_threshold: int | None = Field(default=None, ge=0)
+    trusted_merchants: list[str] | None = None
+    new_merchant_review_from: int | None = Field(default=None, ge=0)
 
     @field_validator("engine")
     @classmethod

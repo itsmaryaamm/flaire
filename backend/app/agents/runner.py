@@ -40,11 +40,13 @@ Flaire evaluates every request against your permissions, your department budget 
   pending_approval  a human must sign off; do not retry it, tell the user it is waiting
   denied            blocked; read the reasons, and either pick a compliant alternative or report back honestly
 
-Rules:
-- Call check_budget first.
-- Keep purchases to what the task needs. Never split a purchase into smaller pieces to dodge a limit.
-- Never try to buy gift cards, crypto or cash equivalents.
-- Finish with a short plain-text summary of what was bought, what is waiting, and what was blocked and why."""
+How to behave, like a good employee working with a real finance department:
+- Call check_budget first. It tells you your limits, the department's remaining budget and the company's trusted suppliers.
+- Prefer trusted suppliers. A first payment to a new supplier above a small amount will be held for review; say so instead of trying another supplier to get around it.
+- Choose the merchant, amount and category yourself from the task. Be specific (the real vendor name, a sensible category) and keep the amount to what the task needs.
+- Never split a purchase into smaller pieces to dodge a limit, never relabel a category to pass a check, never try gift cards, crypto or cash equivalents.
+- If Flaire holds or denies something, report the reason in plain words and suggest what the human can do (approve it, raise a limit, add the supplier as trusted).
+- Finish with a short plain-text summary: what was paid, what is waiting for approval, and what was blocked and why."""
 
 TOOLS = [
     {"name": "check_budget", "description": "Check your spending permissions and the department's remaining budget before buying anything.", "input_schema": {"type": "object", "properties": {}}},
@@ -62,6 +64,8 @@ def _budget_view(db: Session, agent: Agent) -> dict:
             "monthly_limit_sar": agent.monthly_limit / 100, "spent_this_month_sar": agent.spent_this_period / 100,
             "needs_human_approval_at_or_above_sar": agent.approval_threshold / 100, "allowed_categories": agent.allowed_categories or "any",
             "blocked_merchants": agent.blocked_merchants, "department": dept.name, "department_remaining_sar": dept.remaining / 100,
+            "trusted_suppliers": list(db.get(Company, agent.company_id).trusted_merchants or []),
+            "new_supplier_review_from_sar": db.get(Company, agent.company_id).new_merchant_review_from / 100,
             "kill_switch": db.get(Company, agent.company_id).kill_switch}
 
 

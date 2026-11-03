@@ -25,6 +25,9 @@ class Company(Base):
     require_password_on_approve: Mapped[bool] = mapped_column(Boolean, default=True)
     two_person_threshold: Mapped[int] = mapped_column(Integer, default=250_000)  # halalas; approvals at/above need 2 different humans
     kill_switch_frozen_cards: Mapped[list] = mapped_column(JSON, default=list)
+    # Finance policy: trusted suppliers pay without category checks (still within limits); unknown suppliers get a look first.
+    trusted_merchants: Mapped[list] = mapped_column(JSON, default=list)
+    new_merchant_review_from: Mapped[int] = mapped_column(Integer, default=20_000)  # halalas; 0 disables new-merchant review
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     users: Mapped[list[User]] = relationship(back_populates="company")

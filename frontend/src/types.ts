@@ -18,6 +18,8 @@ export interface Company {
   engine: Engine
   require_password_on_approve: boolean
   two_person_threshold: number
+  trusted_merchants: string[]
+  new_merchant_review_from: number
   created_at: string
 }
 

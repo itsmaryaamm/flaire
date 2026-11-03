@@ -27,7 +27,7 @@ def seed(reset: bool = False) -> dict:
             print("Demo data already present. Use --reset to start over.")
             return {}
 
-        company = Company(name="Nawah Tech", engine="native")
+        company = Company(name="Nawah Tech", engine="native", trusted_merchants=["Google Ads", "Meta Ads", "Canva", "Notion", "Slack", "AWS", "Aramex", "Jarir Bookstore"])
         db.add(company)
         db.flush()
         owner = User(company_id=company.id, email=DEMO_EMAIL, full_name="Sara Al-Otaibi", password_hash=hash_password(DEMO_PASSWORD), role="owner")

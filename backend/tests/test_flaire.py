@@ -34,6 +34,7 @@ def ctx():
     r = client.post("/api/v1/auth/register", json={"company_name": "TestCo", "email": "owner@test.sa", "password": "password123", "full_name": "Owner"})
     assert r.status_code == 201, r.text
     H = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    client.patch("/api/v1/company", json={"trusted_merchants": ["Google Ads", "Snapchat Ads", "TikTok Ads", "Meta Ads", "LinkedIn Ads", "Canva", "Aramex"]}, headers=H)
     dept = client.post("/api/v1/departments", json={"name": "Marketing", "monthly_budget": 500_000}, headers=H).json()
     card = client.post("/api/v1/cards", json={"label": "SNB Business", "provider": "mock_snb", "last4": "4471", "credit_limit": 1_000_000, "is_default": True}, headers=H).json()
     ag = client.post("/api/v1/agents", json={"name": "Marketing AI", "role": "marketing", "department_id": dept["id"], "per_transaction_limit": 100_000,
@@ -283,3 +284,19 @@ def test_lithic_webhook_signature_and_dedupe():
     r2 = client.post("/api/v1/webhooks/lithic", content=body, headers={**headers, "content-type": "application/json"})
     assert r1.status_code == 200 and r1.json()["ok"] and not r1.json().get("duplicate")
     assert r2.json().get("duplicate") is True
+
+
+def test_trusted_and_new_merchant_policy(ctx):
+    from app.core import guard
+    guard.reset()
+    H = ctx["H"]
+    client.patch("/api/v1/company", json={"new_merchant_review_from": 20_000}, headers=H)
+    # trusted supplier: category outside the agent's allowlist still pays
+    pr = buy(ctx, 9_900, merchant="Canva", category="office")
+    assert pr["status"] == "completed" and any("trusted supplier" in r for r in pr["decision"]["reasons"])
+    # brand-new supplier above SAR 200 is held for a human even though everything else passes
+    pr = buy(ctx, 25_000, merchant="Zid Platform", category="software")
+    assert pr["status"] == "pending_approval" and pr["decision"]["rule_id"] == "new-merchant-review"
+    # small amount at a new supplier goes through
+    pr = buy(ctx, 5_000, merchant="Picsart", category="software")
+    assert pr["status"] == "completed"

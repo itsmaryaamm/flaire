@@ -63,9 +63,13 @@ class NativeEngine:
         for blocked in a.blocked_merchants:
             if _norm(blocked) in merchant_n:
                 return self._deny(req, "agent-blocked-merchant", reasons + [f"Merchant '{req.merchant}' is on this agent's blocklist."])
-        if a.allowed_categories and category_n not in {_norm(c) for c in a.allowed_categories}:
-            return self._deny(req, "category-not-allowed", reasons + [f"Category '{req.category}' is not in this agent's allowed categories ({', '.join(a.allowed_categories)})."])
-        reasons.append(f"Merchant '{req.merchant}' and category '{req.category}' allowed.")
+        trusted = any(_norm(t) and _norm(t) in merchant_n for t in req.company_trusted_merchants)
+        if trusted:
+            reasons.append(f"'{req.merchant}' is a trusted supplier. Category check skipped.")
+        else:
+            if a.allowed_categories and category_n not in {_norm(c) for c in a.allowed_categories}:
+                return self._deny(req, "category-not-allowed", reasons + [f"Category '{req.category}' is not in this agent's allowed categories ({', '.join(a.allowed_categories)})."])
+            reasons.append(f"Merchant '{req.merchant}' and category '{req.category}' allowed.")
 
         # 3. Limits and budgets (Shotoku: maxAmount / maxDailyAmount; Flaire: monthly + department)
         if req.amount > a.per_transaction_limit:
@@ -90,7 +94,13 @@ class NativeEngine:
             return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="duplicate-purchase",
                             summary=f"Held for approval: looks like a duplicate of a recent request at {req.merchant}.", decision_id=f"dec_{req.request_id}")
 
-        # 6. Human-in-the-loop threshold
+        # 6. New supplier review: the company has never paid this merchant and the amount is not trivial.
+        if not trusted and req.merchant_is_new and req.new_merchant_review_from and req.amount >= req.new_merchant_review_from:
+            reasons.append(f"'{req.merchant}' is a new supplier for the company and {sar(req.amount)} is at or above the new-supplier review amount ({sar(req.new_merchant_review_from)}). Human approval required.")
+            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="new-merchant-review",
+                            summary=f"Held for approval: first payment to {req.merchant}.", decision_id=f"dec_{req.request_id}")
+
+        # 7. Human-in-the-loop threshold
         if req.amount >= a.approval_threshold:
             reasons.append(f"{sar(req.amount)} is at or above the approval threshold ({sar(a.approval_threshold)}). Human approval required.")
             return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="approval-threshold",
