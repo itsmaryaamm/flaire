@@ -72,3 +72,26 @@ export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message
   return 'Something went wrong.'
 }
+
+
+/**
+ * Render's free tier sleeps after 15 minutes idle and takes 30 to 60 s to wake. Poll /health until it answers
+ * (or give up after ~90 s). Returns true when the API is reachable.
+ */
+export async function wakeServer(onTick?: (seconds: number) => void, maxSeconds = 90): Promise<boolean> {
+  const started = Date.now()
+  while (Date.now() - started < maxSeconds * 1000) {
+    try {
+      await api.get('/health', { timeout: 8_000 })
+      return true
+    } catch {
+      onTick?.(Math.round((Date.now() - started) / 1000))
+      await new Promise((r) => setTimeout(r, 3_000))
+    }
+  }
+  return false
+}
+
+export function isNetworkError(err: unknown): boolean {
+  return axios.isAxiosError(err) && !err.response
+}

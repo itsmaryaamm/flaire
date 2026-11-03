@@ -63,6 +63,12 @@ Every AI employee has a shareable connector link: `https://<your-api>/api/v1/mcp
 
 The endpoint speaks MCP Streamable HTTP (JSON responses, stateless), implemented in `backend/app/api/mcp.py`, so it also works with Claude Desktop, Claude Code (`claude mcp add --transport http flaire <link>`) and any other MCP client. The backend must be deployed (Render) for links to work outside your laptop.
 
+## Keeping it fast on every device
+
+Render's free tier sleeps after 15 minutes idle and takes up to a minute to wake. Two things handle that:
+- The login page wakes the server automatically and shows "Waking up the server" instead of an error.
+- `.github/workflows/keepalive.yml` pings the API every 10 minutes once the repo is on GitHub (Actions must be enabled). Any free uptime pinger (UptimeRobot, cron-job.org) hitting `/api/v1/health` every 10 minutes does the same job.
+
 ## Flaire on your phone
 
 The dashboard is a responsive web app and installable: on iPhone open it in Safari, Share, Add to Home Screen; on Android Chrome choose Install app. Settings → "Flaire on your phone" turns on push notifications, so approvers get "Approval needed: SAR 3,000 at Jarir" on their phone, tap it, and land on the Approvals page. Approval emails (SMTP in `.env`) carry the same link. Push keys are generated automatically on first boot.

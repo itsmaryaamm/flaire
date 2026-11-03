@@ -1,0 +1,13 @@
+# Keeps the free Render backend awake by pinging it every 10 minutes.
+# Set the repository variable FLAIRE_API_URL (Settings → Secrets and variables → Actions → Variables)
+# to https://flaire-api-cmrs.onrender.com if your URL differs.
+name: Keep API awake
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: curl -fsS --max-time 60 "${{ vars.FLAIRE_API_URL || 'https://flaire-api-cmrs.onrender.com' }}/api/v1/health"

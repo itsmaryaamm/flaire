@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
-import { errorMessage } from '../lib/api'
+import { errorMessage, isNetworkError, wakeServer } from '../lib/api'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
 import { AuthShell } from './AuthShell'
@@ -15,16 +15,35 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [waking, setWaking] = useState<number | null>(null)
+
+  // Warm the backend as soon as the page opens, so the first sign-in does not hit a sleeping server.
+  useEffect(() => {
+    let cancelled = false
+    void wakeServer((sec) => !cancelled && setWaking(sec)).then(() => !cancelled && setWaking(null))
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      await login(email.trim(), password)
+      try {
+        await login(email.trim(), password)
+      } catch (err) {
+        if (!isNetworkError(err)) throw err
+        // Server was asleep: wake it, then try once more.
+        const ok = await wakeServer((sec) => setWaking(sec))
+        setWaking(null)
+        if (!ok) throw err
+        await login(email.trim(), password)
+      }
       navigate(location.state?.from || '/', { replace: true })
     } catch (err) {
-      setError(errorMessage(err))
+      setError(isNetworkError(err) ? 'The server is not responding. It may be waking up; try again in a minute.' : errorMessage(err))
     } finally {
       setBusy(false)
     }
@@ -57,6 +76,11 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
+        {waking !== null && (
+          <div className="flex items-center gap-2 rounded-input border border-line bg-lavender px-3 py-2 text-xs text-neutral-600">
+            <Spinner /> Waking up the server ({waking}s). Free hosting sleeps when idle; this takes up to a minute.
+          </div>
+        )}
         <ErrorNote message={error} />
         <button type="submit" className="btn-primary w-full" disabled={busy}>
           {busy && <Spinner />} Sign in
