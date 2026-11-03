@@ -61,7 +61,7 @@ def build_authorization_request(db: Session, company: Company, agent: Agent, pr:
                           monthly_limit=agent.monthly_limit, spent_this_period=agent.spent_this_period, approval_threshold=agent.approval_threshold,
                           allowed_categories=list(agent.allowed_categories or []), blocked_merchants=list(agent.blocked_merchants or []),
                           max_requests_per_hour=agent.max_requests_per_hour, requests_last_hour=recent, duplicate_recent=duplicate),
-        department=DepartmentBudget(department_id=dept.id, name=dept.name, monthly_budget=dept.monthly_budget, spent_this_period=dept.spent_this_period),
+        department=DepartmentBudget(department_id=dept.id, name=dept.name, monthly_budget=dept.monthly_budget, spent_this_period=dept.spent_this_period, spending_paused=dept.spending_paused),
         kill_switch=company.kill_switch,
     )
 
@@ -73,13 +73,15 @@ def decision_to_dict(d: Decision) -> dict:
 def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amount: int, merchant: str, category: str, description: str, card_id: int | None,
                             source: str = "api", client_ip: str | None = None) -> PurchaseRequest:
     ensure_period(db, company)
+    from app.core.categorize import categorize
+    category_final, how = categorize(merchant, category, description)
     pr = PurchaseRequest(company_id=company.id, agent_id=agent.id, department_id=agent.department_id, card_id=card_id, amount=amount,
-                         currency=company.currency, merchant=merchant.strip(), category=category.strip().lower(), description=description or "", status="pending_approval")
+                         currency=company.currency, merchant=merchant.strip(), category=category_final, description=description or "", status="pending_approval")
     db.add(pr)
     db.flush()
     agent.last_active_at = utcnow()
     audit.record(db, company.id, actor_type="agent", actor_id=agent.id, actor_name=agent.name, event="purchase.requested",
-                 details={"request_id": pr.id, "amount": amount, "merchant": merchant, "category": category, "source": source, "ip": client_ip})
+                 details={"request_id": pr.id, "amount": amount, "merchant": merchant, "category": category_final, "category_given": category, "categorized_by": how, "source": source, "ip": client_ip})
 
     engine = get_engine(company.engine or settings.auth_engine)
     decision = engine.authorize(build_authorization_request(db, company, agent, pr))
@@ -91,6 +93,10 @@ def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amou
 
     if decision.approved:
         execute_payment(db, company, pr, decision)
+    elif decision.verdict == "pending_approval":
+        from app.core.notify import notify_approval_needed
+        db.flush()
+        notify_approval_needed(db, company, pr)
     db.commit()
     db.refresh(pr)
     return pr

@@ -110,10 +110,10 @@ export default function BudgetsPage() {
       />
 
       {list.length > 0 && (
-        <div className="card p-5 mb-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="card-lg p-5 mb-5 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1">
-            <div className="text-xs text-neutral-500 uppercase tracking-wide">All departments</div>
-            <div className="text-lg font-semibold tnum mt-0.5">
+            <div className="mono-label">All departments</div>
+            <div className="text-2xl font-bold tracking-tightest tnum mt-1">
               {sar(totalSpent)} <span className="text-neutral-400 font-normal">of {sar(totalBudget)}</span>
             </div>
             <ProgressBar value={totalSpent} max={totalBudget} className="mt-2" />
@@ -127,7 +127,7 @@ export default function BudgetsPage() {
       ) : depts.error && !depts.data ? (
         <ErrorNote message={depts.error} />
       ) : list.length === 0 ? (
-        <div className="card">
+        <div className="card-lg">
           <EmptyState
             icon={<PieChart className="h-5 w-5" />}
             title="No departments yet"
@@ -142,10 +142,10 @@ export default function BudgetsPage() {
       ) : (
         <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           {list.map((d) => (
-            <div key={d.id} className="card p-5 flex flex-col gap-3">
+            <div key={d.id} className="card-lg p-5 flex flex-col gap-3">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <h3 className="font-semibold">{d.name}</h3>
+                  <h3 className="font-bold">{d.name}</h3>
                   <div className="text-xs text-neutral-500">
                     {d.agent_count} AI employee{d.agent_count === 1 ? '' : 's'} · period from {d.period_start}
                   </div>
@@ -154,14 +154,14 @@ export default function BudgetsPage() {
                   <button className="btn-ghost p-1.5" onClick={() => setEditing(d)} aria-label="Edit">
                     <Pencil className="h-4 w-4" />
                   </button>
-                  <button className="btn-ghost p-1.5 text-red-600 hover:bg-red-50" onClick={() => setDeleting(d)} aria-label="Delete">
+                  <button className="btn-ghost p-1.5 text-danger hover:bg-danger-tint" onClick={() => setDeleting(d)} aria-label="Delete">
                     <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
               </div>
               <div>
                 <div className="flex items-baseline justify-between">
-                  <Money halalas={d.spent_this_period} className="text-xl font-semibold" />
+                  <Money halalas={d.spent_this_period} className="kpi-value" />
                   <span className="text-xs text-neutral-500 tnum">{pct(d.spent_this_period, d.monthly_budget)}%</span>
                 </div>
                 <ProgressBar value={d.spent_this_period} max={d.monthly_budget} className="mt-2" />
@@ -169,11 +169,11 @@ export default function BudgetsPage() {
               <div className="grid grid-cols-2 text-sm pt-1">
                 <div>
                   <div className="text-xs text-neutral-500">Budget</div>
-                  <div className="font-medium tnum">{sar(d.monthly_budget)}</div>
+                  <div className="font-semibold tnum">{sar(d.monthly_budget)}</div>
                 </div>
                 <div>
                   <div className="text-xs text-neutral-500">Remaining</div>
-                  <div className={`font-medium tnum ${d.remaining <= 0 ? 'text-red-600' : 'text-mint-deep'}`}>{sar(d.remaining)}</div>
+                  <div className={`font-semibold tnum ${d.remaining <= 0 ? 'text-danger' : 'text-success'}`}>{sar(d.remaining)}</div>
                 </div>
               </div>
             </div>

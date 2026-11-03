@@ -56,6 +56,14 @@ export function formatDate(iso: string | null | undefined, withTime = true): str
   })
 }
 
+/** Clock time only, e.g. "10:13". */
+export function formatTime(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
 export function timeAgo(iso: string | null | undefined): string {
   if (!iso) return 'never'
   const diff = Date.now() - new Date(iso).getTime()

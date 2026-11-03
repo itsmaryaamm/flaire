@@ -63,6 +63,10 @@ Every AI employee has a shareable connector link: `https://<your-api>/api/v1/mcp
 
 The endpoint speaks MCP Streamable HTTP (JSON responses, stateless), implemented in `backend/app/api/mcp.py`, so it also works with Claude Desktop, Claude Code (`claude mcp add --transport http flaire <link>`) and any other MCP client. The backend must be deployed (Render) for links to work outside your laptop.
 
+## Flaire on your phone
+
+The dashboard is a responsive web app and installable: on iPhone open it in Safari, Share, Add to Home Screen; on Android Chrome choose Install app. Settings → "Flaire on your phone" turns on push notifications, so approvers get "Approval needed: SAR 3,000 at Jarir" on their phone, tap it, and land on the Approvals page. Approval emails (SMTP in `.env`) carry the same link. Push keys are generated automatically on first boot.
+
 ## What's in the box
 
 | Piece | Where | Status |
@@ -115,7 +119,7 @@ docs/API.md                        API contract
 - Humans use JWT. Agents use `X-Agent-Key` (stored hashed, shown once, rotatable). Agent keys only work on `/agent/*` routes: there is no endpoint an agent can call to approve, change a limit, or touch a card.
 - The engine fails closed. A sidecar outage, a malformed policy or an internal error is a denial.
 - Payment needs a signed receipt bound to agent + merchant + amount with a 5-minute TTL. A tampered or replayed receipt is rejected before any adapter is called.
-- Approvals need password re-entry; amounts at or above the company's two-person threshold need two different humans.
+- Managers are notified by email and phone push when a request needs approval. Approvals need password re-entry; amounts at or above the company's two-person threshold need two different humans.
 - Kill switch denies all new requests, freezes approvals and pauses every card (Lithic cards are PAUSED at the issuer) until lifted.
 - Rate limits and bad-key lockout on agent and connector endpoints; connector links can expire.
 - Duplicate purchases go to a human. Budget rows are locked during payment.

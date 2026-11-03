@@ -88,6 +88,7 @@ class DepartmentIn(BaseModel):
 class DepartmentPatch(BaseModel):
     name: str | None = None
     monthly_budget: int | None = Field(default=None, ge=0)
+    spending_paused: bool | None = None
 
 
 class DepartmentOut(BaseModel):
@@ -97,6 +98,7 @@ class DepartmentOut(BaseModel):
     spent_this_period: int
     remaining: int
     period_start: date
+    spending_paused: bool = False
     agent_count: int = 0
 
 

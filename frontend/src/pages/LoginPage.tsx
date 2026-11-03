@@ -63,14 +63,14 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <div className="mt-5 rounded-lg border border-dashed border-neutral-300 bg-white px-3 py-2.5 text-xs text-neutral-600">
+      <div className="mt-5 rounded-card border border-dashed border-line-strong bg-lavender px-3.5 py-3 text-xs text-neutral-600">
         <div>
           Demo account: <code className="font-mono text-ink">demo@flaire.sa</code> /{' '}
           <code className="font-mono text-ink">demo1234</code>
         </div>
         <button
           type="button"
-          className="text-brand font-medium mt-1 hover:underline"
+          className="text-brand font-semibold mt-1 hover:underline"
           onClick={() => {
             setEmail('demo@flaire.sa')
             setPassword('demo1234')
@@ -82,11 +82,10 @@ export default function LoginPage() {
 
       <p className="text-sm text-neutral-500 mt-6">
         New here?{' '}
-        <Link to="/register" className="text-brand font-medium hover:underline">
+        <Link to="/register" className="text-brand font-semibold hover:underline">
           Create a company
         </Link>
       </p>
-      <p className="text-xs text-neutral-400 mt-6">Simulation. No real money moves.</p>
     </AuthShell>
   )
 }

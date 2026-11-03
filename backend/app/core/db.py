@@ -47,6 +47,7 @@ _NEW_COLUMNS = {
     "companies": [("require_password_on_approve", "BOOLEAN DEFAULT 1"), ("two_person_threshold", "INTEGER DEFAULT 250000"), ("kill_switch_frozen_cards", "JSON NULL"),
                   ("trusted_merchants", "JSON NULL"), ("new_merchant_review_from", "INTEGER DEFAULT 20000")],
     "agents": [("key_expires_at", "TIMESTAMP NULL")],
+    "departments": [("spending_paused", "BOOLEAN DEFAULT 0")],
 }
 
 
@@ -62,5 +63,5 @@ def _migrate() -> None:
             for name, ddl in cols:
                 if name in existing:
                     continue
-                ddl_pg = ddl.replace("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE").replace("TIMESTAMP NULL", "TIMESTAMPTZ NULL")
+                ddl_pg = ddl.replace("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE").replace("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE").replace("TIMESTAMP NULL", "TIMESTAMPTZ NULL")
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_pg if is_pg else ddl}"))

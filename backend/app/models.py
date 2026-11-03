@@ -56,6 +56,7 @@ class Department(Base):
     monthly_budget: Mapped[int] = mapped_column(Integer, default=0)
     spent_this_period: Mapped[int] = mapped_column(Integer, default=0)
     period_start: Mapped[date] = mapped_column(Date, default=lambda: date.today().replace(day=1))
+    spending_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # department-level kill switch
 
     company: Mapped[Company] = relationship(back_populates="departments")
     agents: Mapped[list[Agent]] = relationship(back_populates="department")
@@ -190,3 +191,22 @@ class WebhookEvent(Base):
     event_type: Mapped[str] = mapped_column(String(120))
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PushSubscription(Base):
+    """Browser/phone push subscription for a dashboard user (installed Flaire app)."""
+    __tablename__ = "push_subscriptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    endpoint: Mapped[str] = mapped_column(Text, unique=True)
+    p256dh: Mapped[str] = mapped_column(String(200))
+    auth: Mapped[str] = mapped_column(String(100))
+    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class VapidKey(Base):
+    __tablename__ = "vapid_keys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    private_pem: Mapped[str] = mapped_column(Text)
+    public_key: Mapped[str] = mapped_column(String(200))

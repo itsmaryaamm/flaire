@@ -13,12 +13,9 @@ export function providerInfo(p: string) {
 
 export function ProviderBadge({ provider }: { provider: string }) {
   const info = providerInfo(provider)
-  const cls =
-    provider === 'lithic'
-      ? 'bg-violet-100 text-violet-800 border-violet-300/60'
-      : 'bg-neutral-100 text-neutral-700 border-neutral-300/60'
+  const cls = provider === 'lithic' ? 'bg-brand-light text-brand' : 'bg-lavender-deep text-neutral-600'
   return (
-    <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap ${cls}`}>
+    <span className={`inline-flex items-center rounded-pill px-2 py-0.5 text-xs font-semibold whitespace-nowrap ${cls}`}>
       {info.short}
     </span>
   )

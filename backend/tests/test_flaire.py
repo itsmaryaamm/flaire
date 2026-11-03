@@ -300,3 +300,42 @@ def test_trusted_and_new_merchant_policy(ctx):
     # small amount at a new supplier goes through
     pr = buy(ctx, 5_000, merchant="Picsart", category="software")
     assert pr["status"] == "completed"
+
+
+def test_categorization_and_department_pause_and_exports(ctx):
+    from app.core import guard
+    from app.core.categorize import categorize
+    guard.reset()
+    H = ctx["H"]
+    assert categorize("Snapchat Ads", "marketing stuff", "")[0] == "advertising"
+    assert categorize("Jarir Bookstore", None, "two laptops for the team")[0] == "equipment"
+    assert categorize("Some Shop", "advertising", "iTunes gift cards")[0] == "gift_card"   # mislabel caught
+    assert categorize("Unknown Co", "", "")[0] == "other"
+    # a mislabelled gift card from the API is normalised and then blocked
+    pr = buy(ctx, 5_000, merchant="Some Shop", category="advertising", desc="iTunes gift cards")
+    assert pr["category"] == "gift_card" and pr["status"] == "denied"
+    # department kill switch
+    client.patch("/api/v1/departments/%d" % ctx["dept"]["id"], json={"spending_paused": True}, headers=H)
+    pr = buy(ctx, 1_000, merchant="Google Ads")
+    assert pr["status"] == "denied" and pr["decision"]["rule_id"] == "department-paused"
+    client.patch("/api/v1/departments/%d" % ctx["dept"]["id"], json={"spending_paused": False}, headers=H)
+    # reconciliation and exports
+    r = client.get("/api/v1/reconciliation", headers=H).json()
+    assert r["ok"] is True and r["issues"] == []
+    for kind in ("transactions", "requests", "audit"):
+        e = client.get(f"/api/v1/export/{kind}.csv", headers=H)
+        assert e.status_code == 200 and e.text.splitlines()[0].startswith("id,")
+    # approval notification was recorded in the ledger (in-app channel without SMTP)
+    events = [e for e in client.get("/api/v1/audit?limit=1000", headers=H).json() if e["event"] == "approval.notified"]
+    assert events and events[0]["details"]["channel"] == "in-app"
+
+
+def test_push_endpoints(ctx):
+    H = ctx["H"]
+    k = client.get("/api/v1/push/vapid-public-key").json()["public_key"]
+    assert len(k) > 60
+    r = client.post("/api/v1/push/subscribe", json={"endpoint": "https://push.example/abc", "keys": {"p256dh": "BPx", "auth": "abc"}}, headers=H)
+    assert r.status_code == 201
+    t = client.post("/api/v1/push/test", headers=H).json()
+    assert t["subscriptions"] == 1  # delivery to a fake endpoint fails, which is fine
+    assert client.request("DELETE", "/api/v1/push/subscribe", json={"endpoint": "https://push.example/abc"}, headers=H).status_code == 204

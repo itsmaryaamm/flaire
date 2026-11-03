@@ -138,7 +138,7 @@ function Json({ value }: { value: unknown }) {
   const v = parseMaybeJson(value)
   const text = typeof v === 'string' ? v : JSON.stringify(v, null, 2)
   return (
-    <pre className="text-xs font-mono bg-neutral-50 border border-neutral-200 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap break-words max-h-64">
+    <pre className="text-xs font-mono bg-lavender border border-line rounded-input p-3 overflow-x-auto whitespace-pre-wrap break-words max-h-64">
       {text}
     </pre>
   )
@@ -147,7 +147,7 @@ function Json({ value }: { value: unknown }) {
 function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   const [open, setOpen] = useState(false)
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white">
+    <div className="rounded-input border border-line bg-white">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -163,13 +163,13 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
         )}
       </button>
       {open && (
-        <div className="px-3 pb-3 space-y-2 border-t border-neutral-100 pt-2">
+        <div className="px-3 pb-3 space-y-2 border-t border-line pt-2">
           <div>
-            <div className="text-[11px] uppercase tracking-wide text-neutral-500 mb-1">Input</div>
+            <div className="mono-label mb-1">Input</div>
             <Json value={item.input ?? {}} />
           </div>
           <div>
-            <div className="text-[11px] uppercase tracking-wide text-neutral-500 mb-1">Output</div>
+            <div className="mono-label mb-1">Output</div>
             <Json value={item.output ?? null} />
           </div>
         </div>
@@ -187,7 +187,7 @@ export function Transcript({ entries }: { entries: TranscriptEntry[] }) {
         if (it.kind === 'user')
           return (
             <div key={i} className="flex justify-end">
-              <div className="max-w-[85%] rounded-2xl rounded-br-md bg-brand text-white px-4 py-2.5 text-sm whitespace-pre-wrap">
+              <div className="max-w-[85%] rounded-card rounded-br-md bg-brand text-white px-4 py-2.5 text-sm whitespace-pre-wrap">
                 <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-white/70 mb-1">
                   <User className="h-3 w-3" /> You
                 </div>
@@ -198,7 +198,7 @@ export function Transcript({ entries }: { entries: TranscriptEntry[] }) {
         if (it.kind === 'assistant')
           return (
             <div key={i} className="flex justify-start">
-              <div className="max-w-[85%] rounded-2xl rounded-bl-md bg-white border border-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap">
+              <div className="max-w-[85%] rounded-card rounded-bl-md bg-white border border-line px-4 py-2.5 text-sm whitespace-pre-wrap">
                 <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-neutral-500 mb-1">
                   <Bot className="h-3 w-3" /> AI employee
                 </div>

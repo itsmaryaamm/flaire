@@ -49,11 +49,11 @@ export function ApiKeyReveal({
           </div>
           <p className="text-xs text-neutral-600 mt-1 mb-2">
             For scripts and other agent frameworks. Pass it as{' '}
-            <code className="font-mono text-xs bg-neutral-100 px-1 py-0.5 rounded">X-Agent-Key</code>.
+            <code className="font-mono text-xs bg-lavender-deep px-1 py-0.5 rounded">X-Agent-Key</code>.
           </p>
           {apiKey && <CopyBox value={apiKey} />}
         </div>
-        <div className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <div className="flex items-start gap-2 rounded-input border border-amber-300 bg-warn-tint px-3 py-2 text-xs text-warn">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
             This is the only time the key and link are shown. Flaire stores a hash. Lost it? Rotate the key to

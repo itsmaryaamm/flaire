@@ -58,9 +58,8 @@ export default function RegisterPage() {
       </form>
       <p className="text-sm text-neutral-500 mt-6">
         Already have an account?{' '}
-        <Link to="/login" className="text-brand font-medium hover:underline">Sign in</Link>
+        <Link to="/login" className="text-brand font-semibold hover:underline">Sign in</Link>
       </p>
-      <p className="text-xs text-neutral-400 mt-6">Simulation. No real money moves.</p>
     </AuthShell>
   )
 }

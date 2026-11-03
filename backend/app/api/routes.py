@@ -427,3 +427,100 @@ def list_audit(limit: int = Query(100, le=1000), user: User = Depends(get_curren
 @router.get("/audit/verify", tags=["audit"])
 def verify_audit(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return audit.verify(db, user.company_id)
+
+
+# ====================================================== reconciliation + exports
+@router.get("/reconciliation", tags=["audit"])
+def reconciliation(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Match purchase requests against payment events and flag anything that does not line up."""
+    cid = user.company_id
+    prs = db.query(PurchaseRequest).filter(PurchaseRequest.company_id == cid).all()
+    txs = {t.purchase_request_id: t for t in db.query(Transaction).filter(Transaction.company_id == cid).all()}
+    issues = []
+    for pr in prs:
+        tx = txs.get(pr.id)
+        if pr.status == "completed" and (not tx or tx.status not in ("settled", "authorized")):
+            issues.append({"request_id": pr.id, "type": "completed_without_settlement", "detail": f"Request marked completed but transaction is {tx.status if tx else 'missing'}"})
+        if pr.status in ("denied", "rejected", "pending_approval") and tx and tx.status in ("settled", "authorized"):
+            issues.append({"request_id": pr.id, "type": "payment_without_approval", "detail": "Money moved for a request that was not approved"})
+        if pr.status == "approved":
+            issues.append({"request_id": pr.id, "type": "stuck_approved", "detail": "Approved but no payment outcome recorded"})
+        if tx and tx.amount != pr.amount:
+            issues.append({"request_id": pr.id, "type": "amount_mismatch", "detail": f"Request {pr.amount} vs transaction {tx.amount}"})
+    dup = {}
+    for t in txs.values():
+        key = (t.provider, t.provider_ref)
+        dup.setdefault(key, []).append(t.id)
+    for key, ids in dup.items():
+        if len(ids) > 1:
+            issues.append({"request_id": None, "type": "duplicate_provider_ref", "detail": f"{key[0]} ref {key[1]} appears on transactions {ids}"})
+    return {"ok": len(issues) == 0, "requests": len(prs), "transactions": len(txs), "issues": issues}
+
+
+@router.get("/export/{kind}.csv", tags=["audit"])
+def export_csv(kind: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    import csv, io
+    from fastapi.responses import StreamingResponse
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    cid = user.company_id
+    if kind == "transactions":
+        w.writerow(["id", "created_at", "request_id", "agent", "department", "merchant", "category", "amount_sar", "status", "provider", "provider_ref", "card"])
+        for t in db.query(Transaction).filter(Transaction.company_id == cid).order_by(Transaction.id).all():
+            pr = db.get(PurchaseRequest, t.purchase_request_id)
+            w.writerow([t.id, t.created_at.isoformat(), t.purchase_request_id, pr.agent.name if pr else "", pr.department.name if pr else "", t.merchant, pr.category if pr else "",
+                        f"{t.amount / 100:.2f}", t.status, t.provider, t.provider_ref, f"{t.card.label} {t.card.last4}" if t.card else ""])
+    elif kind == "requests":
+        w.writerow(["id", "created_at", "agent", "department", "merchant", "category", "amount_sar", "status", "verdict", "rule_id", "approved_by", "description", "reasons"])
+        for pr in db.query(PurchaseRequest).filter(PurchaseRequest.company_id == cid).order_by(PurchaseRequest.id).all():
+            d = pr.decision or {}
+            w.writerow([pr.id, pr.created_at.isoformat(), pr.agent.name, pr.department.name, pr.merchant, pr.category, f"{pr.amount / 100:.2f}", pr.status, d.get("verdict"), d.get("rule_id"),
+                        pr.approved_by.full_name if pr.approved_by else "", pr.description, " | ".join(d.get("reasons", []))])
+    elif kind == "audit":
+        w.writerow(["id", "ts", "actor_type", "actor_name", "event", "details", "prev_hash", "hash"])
+        for e in db.query(AuditEntry).filter(AuditEntry.company_id == cid).order_by(AuditEntry.id).all():
+            import json as _json
+            w.writerow([e.id, e.ts.isoformat(), e.actor_type, e.actor_name, e.event, _json.dumps(e.details, ensure_ascii=False), e.prev_hash, e.hash])
+    else:
+        raise HTTPException(404, "kind must be transactions, requests or audit")
+    buf.seek(0)
+    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=flaire-{kind}.csv"})
+
+
+# ====================================================== push notifications (installed phone app)
+@router.get("/push/vapid-public-key", tags=["push"])
+def vapid_public_key(db: Session = Depends(get_db)):
+    from app.core.push import get_keys
+    return {"public_key": get_keys(db)[1]}
+
+
+@router.post("/push/subscribe", status_code=201, tags=["push"])
+def push_subscribe(body: dict, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models import PushSubscription
+    endpoint = body.get("endpoint"); keys = body.get("keys") or {}
+    if not endpoint or not keys.get("p256dh") or not keys.get("auth"):
+        raise HTTPException(422, "Invalid push subscription")
+    sub = db.query(PushSubscription).filter(PushSubscription.endpoint == endpoint).first()
+    if not sub:
+        sub = PushSubscription(user_id=user.id, endpoint=endpoint, p256dh=keys["p256dh"], auth=keys["auth"], user_agent=request.headers.get("user-agent", "")[:300])
+        db.add(sub)
+    else:
+        sub.user_id, sub.p256dh, sub.auth = user.id, keys["p256dh"], keys["auth"]
+    audit.record(db, user.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="push.subscribed", details={"device": request.headers.get("user-agent", "")[:80]})
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/push/subscribe", status_code=204, tags=["push"])
+def push_unsubscribe(body: dict, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models import PushSubscription
+    db.query(PushSubscription).filter(PushSubscription.endpoint == body.get("endpoint", ""), PushSubscription.user_id == user.id).delete()
+    db.commit()
+
+
+@router.post("/push/test", tags=["push"])
+def push_test(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.core.push import send_to_company_approvers
+    result = send_to_company_approvers(db, user.company_id, "Flaire test", "Push notifications are working on this device.", f"{settings.dashboard_url}/approvals")
+    db.commit()
+    return result

@@ -5,7 +5,7 @@ export function ErrorNote({ message, className = '' }: { message: string | null;
   return (
     <div
       role="alert"
-      className={`flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 ${className}`}
+      className={`flex items-start gap-2 rounded-input border border-red-200 bg-danger-tint px-3 py-2 text-sm text-danger ${className}`}
     >
       <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
       <span>{message}</span>

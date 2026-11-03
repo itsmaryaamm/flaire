@@ -28,11 +28,11 @@ const EXAMPLES = [
 
 function ModeBadge({ mode }: { mode: AgentRun['mode'] }) {
   return mode === 'claude' ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-brand text-white text-[11px] font-medium px-2 py-0.5">
+    <span className="inline-flex items-center gap-1 rounded-pill bg-brand text-white text-[11px] font-semibold px-2 py-0.5">
       <Sparkles className="h-3 w-3" /> Real Claude
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1 rounded-full bg-neutral-200 text-neutral-700 text-[11px] font-medium px-2 py-0.5">
+    <span className="inline-flex items-center gap-1 rounded-pill bg-lavender-deep text-neutral-600 text-[11px] font-semibold px-2 py-0.5">
       Scripted (no API key)
     </span>
   )
@@ -43,7 +43,7 @@ function RunResult({ run }: { run: AgentRun }) {
     <div className="space-y-5">
       <Transcript entries={run.transcript ?? []} />
       <div>
-        <h4 className="text-sm font-semibold mb-2">Purchase requests created by this run</h4>
+        <h4 className="mono-label mb-2">Purchase requests created by this run</h4>
         {(run.purchase_requests ?? []).length === 0 ? (
           <p className="text-sm text-neutral-500">No purchase requests were created.</p>
         ) : (
@@ -51,7 +51,7 @@ function RunResult({ run }: { run: AgentRun }) {
             {run.purchase_requests.map((pr) => (
               <li key={pr.id} className="card p-4">
                 <div className="flex flex-wrap items-center gap-2 mb-2">
-                  <span className="font-medium text-sm">{pr.merchant}</span>
+                  <span className="font-semibold text-sm">{pr.merchant}</span>
                   <span className="text-xs text-neutral-500">{pr.category}</span>
                   <Money halalas={pr.amount} className="text-sm font-semibold ml-auto" />
                   <StatusPill status={pr.status} />
@@ -151,20 +151,20 @@ export default function AgentConsolePage() {
 
   return (
     <div className="space-y-6">
-      <Link to="/agents" className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-ink">
+      <Link to="/agents" className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-brand font-medium">
         <ArrowLeft className="h-4 w-4" /> AI employees
       </Link>
 
       <div className="grid lg:grid-cols-5 gap-6">
         {/* Left: details + limits */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="card p-5">
+          <div className="card-lg p-5">
             <div className="flex items-start gap-3">
-              <div className="rounded-lg bg-brand-light text-brand p-2.5 shrink-0">
+              <div className="rounded-xl bg-brand-light text-brand p-2.5 shrink-0">
                 <Bot className="h-5 w-5" />
               </div>
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl font-semibold truncate">{a.name}</h1>
+                <h1 className="text-xl font-bold truncate">{a.name}</h1>
                 <div className="text-sm text-neutral-500 capitalize">
                   {a.role} · {a.department_name}
                 </div>
@@ -181,7 +181,7 @@ export default function AgentConsolePage() {
                   </span>
                 </dt>
                 <dd>
-                  <ProgressBar value={a.spent_this_period} max={a.monthly_limit} className="mt-1.5" />
+                  <ProgressBar value={a.spent_this_period} max={a.monthly_limit} className="mt-1.5" thin />
                 </dd>
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -209,7 +209,7 @@ export default function AgentConsolePage() {
                     <span className="text-neutral-400 text-xs">any</span>
                   ) : (
                     a.allowed_categories.map((c) => (
-                      <span key={c} className="rounded-md bg-brand-light text-brand text-xs px-2 py-0.5">
+                      <span key={c} className="rounded-pill bg-brand-light text-brand text-xs font-semibold px-2 py-0.5">
                         {c}
                       </span>
                     ))
@@ -223,7 +223,7 @@ export default function AgentConsolePage() {
                     <span className="text-neutral-400 text-xs">none</span>
                   ) : (
                     a.blocked_merchants.map((c) => (
-                      <span key={c} className="rounded-md bg-red-50 text-red-700 text-xs px-2 py-0.5">
+                      <span key={c} className="rounded-pill bg-danger-tint text-danger text-xs font-semibold px-2 py-0.5">
                         {c}
                       </span>
                     ))
@@ -236,7 +236,7 @@ export default function AgentConsolePage() {
               </div>
             </dl>
 
-            <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-neutral-100">
+            <div className="flex flex-wrap gap-2 mt-5 pt-4 border-t border-line">
               <button className="btn-secondary text-xs" onClick={() => setEditOpen(true)}>
                 <SlidersHorizontal className="h-3.5 w-3.5" /> Edit limits
               </button>
@@ -250,10 +250,10 @@ export default function AgentConsolePage() {
             </div>
           </div>
 
-          <div className="card p-5 border-brand/40 bg-brand/5">
+          <div className="card-lg p-5 border-brand/40 bg-brand-tint">
             <div className="flex items-center gap-2 mb-2">
               <Sparkles className="h-4 w-4 text-brand" />
-              <h3 className="font-semibold text-sm">Use this AI employee from any Claude</h3>
+              <h3 className="font-bold text-sm">Use this AI employee from any Claude</h3>
             </div>
             <p className="text-xs text-neutral-600 mb-3">
               Flaire is an MCP connector. Share one link and the recipient's own Claude becomes{' '}
@@ -276,14 +276,14 @@ export default function AgentConsolePage() {
           <div className="card p-5">
             <div className="flex items-center gap-2 mb-2">
               <TerminalSquare className="h-4 w-4 text-brand" />
-              <h3 className="font-semibold text-sm">Call the API as this agent</h3>
+              <h3 className="font-bold text-sm">Call the API as this agent</h3>
             </div>
             <p className="text-xs text-neutral-500 mb-3">
               Agents authenticate with <code className="font-mono">X-Agent-Key</code> and can only reach{' '}
               <code className="font-mono">/agent/*</code>. They receive a decision; they cannot approve, override or
               see other agents.
             </p>
-            <pre className="text-[11px] font-mono bg-ink text-neutral-100 rounded-lg p-3 overflow-x-auto whitespace-pre">
+            <pre className="text-[11px] font-mono bg-brand-deep text-white/90 rounded-card p-3 overflow-x-auto whitespace-pre">
               {curl}
             </pre>
             <div className="mt-2">
@@ -294,8 +294,8 @@ export default function AgentConsolePage() {
 
         {/* Right: task runner */}
         <div className="lg:col-span-3 space-y-4">
-          <div className="card p-5">
-            <h3 className="font-semibold">Give this AI employee a task</h3>
+          <div className="card-lg p-5">
+            <h3 className="font-bold">Give this AI employee a task</h3>
             <p className="text-xs text-neutral-500 mt-0.5 mb-3">
               The agent plans the task and asks Flaire for purchases. Flaire decides. Try one that should pass, one
               that needs approval and one that should be blocked.
@@ -306,7 +306,7 @@ export default function AgentConsolePage() {
                   key={ex}
                   type="button"
                   onClick={() => setTask(ex)}
-                  className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-xs hover:border-brand hover:text-brand text-left"
+                  className="rounded-pill border border-line-strong bg-white px-3 py-1 text-xs font-medium hover:border-brand hover:text-brand text-left"
                 >
                   {ex}
                 </button>
@@ -332,9 +332,9 @@ export default function AgentConsolePage() {
           </div>
 
           {running && (
-            <div className="card p-6 flex flex-col items-center text-center gap-2">
+            <div className="card-lg p-6 flex flex-col items-center text-center gap-2">
               <Spinner className="h-6 w-6 text-brand" />
-              <div className="text-sm font-medium">The AI employee is working on it</div>
+              <div className="text-sm font-semibold">The AI employee is working on it</div>
               <div className="text-xs text-neutral-500">
                 Planning the task, calling request_purchase, and waiting for Flaire's decision. Up to 30 seconds.
               </div>
@@ -344,25 +344,25 @@ export default function AgentConsolePage() {
           {result && !running && (
             <div className="card p-5">
               <div className="flex items-center justify-between gap-2 mb-4">
-                <h3 className="font-semibold">Run #{result.run_id ?? result.id}</h3>
+                <h3 className="font-bold">Run #{result.run_id ?? result.id}</h3>
                 <ModeBadge mode={result.mode} />
               </div>
               <RunResult run={result} />
             </div>
           )}
 
-          <div className="card">
-            <div className="flex items-center gap-2 px-5 py-4 border-b border-neutral-200">
+          <div className="card-lg overflow-hidden">
+            <div className="flex items-center gap-2 px-5 py-4 border-b border-line">
               <History className="h-4 w-4 text-neutral-500" />
-              <h3 className="font-semibold text-sm">Previous runs</h3>
-              <span className="text-xs text-neutral-400 ml-auto">{runs.data?.length ?? 0}</span>
+              <h3 className="font-bold text-sm">Previous runs</h3>
+              <span className="font-mono text-xs text-neutral-400 ml-auto tnum">{runs.data?.length ?? 0}</span>
             </div>
             {runs.loading && !runs.data ? (
               <PageLoader />
             ) : (runs.data ?? []).length === 0 ? (
               <EmptyState compact title="No runs yet" description="Run a task above to see the transcript here." />
             ) : (
-              <ul className="divide-y divide-neutral-100">
+              <ul className="divide-y divide-line">
                 {[...(runs.data ?? [])].reverse().map((r, idx) => {
                   const key = r.run_id ?? r.id ?? idx
                   const open = openRun === key
@@ -370,11 +370,11 @@ export default function AgentConsolePage() {
                     <li key={key}>
                       <button
                         type="button"
-                        className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-neutral-50"
+                        className="w-full px-5 py-3 flex items-center gap-3 text-left hover:bg-lavender"
                         onClick={() => setOpenRun(open ? null : key)}
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="text-sm font-medium truncate">{r.task || `Run #${key}`}</div>
+                          <div className="text-sm font-semibold truncate">{r.task || `Run #${key}`}</div>
                           <div className="text-xs text-neutral-500">
                             {r.created_at ? formatDate(r.created_at) : ''} · {(r.purchase_requests ?? []).length} request(s)
                           </div>

@@ -49,7 +49,7 @@ function RequestsTab() {
             </option>
           ))}
         </select>
-        <span className="text-xs text-neutral-500 self-center ml-auto tnum">{list.length} request(s)</span>
+        <span className="font-mono text-xs text-neutral-500 self-center ml-auto tnum">{list.length} requests</span>
       </div>
 
       {reqs.loading && !reqs.data ? (
@@ -57,14 +57,14 @@ function RequestsTab() {
       ) : reqs.error && !reqs.data ? (
         <ErrorNote message={reqs.error} />
       ) : list.length === 0 ? (
-        <div className="card">
+        <div className="card-lg">
           <EmptyState title="No purchase requests" description="Try a different filter, or give an AI employee a task." />
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="card-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px]">
-              <thead className="bg-neutral-50 border-b border-neutral-200">
+              <thead className="bg-lavender border-b border-line">
                 <tr>
                   <th className="th w-8"></th>
                   <th className="th">Merchant</th>
@@ -75,17 +75,17 @@ function RequestsTab() {
                   <th className="th">Created</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-100">
+              <tbody className="divide-y divide-line">
                 {list.map((r) => {
                   const open = openId === r.id
                   return (
                     <Fragment key={r.id}>
-                      <tr className="hover:bg-neutral-50 cursor-pointer" onClick={() => setOpenId(open ? null : r.id)}>
+                      <tr className="hover:bg-lavender/70 cursor-pointer" onClick={() => setOpenId(open ? null : r.id)}>
                         <td className="td text-neutral-400">
                           {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                         </td>
                         <td className="td">
-                          <div className="font-medium">{r.merchant}</div>
+                          <div className="font-semibold">{r.merchant}</div>
                           <div className="text-xs text-neutral-500 truncate max-w-xs">{r.description}</div>
                         </td>
                         <td className="td">
@@ -99,13 +99,13 @@ function RequestsTab() {
                         <td className="td">
                           <div className="flex items-center gap-1.5">
                             <StatusPill status={r.status} />
-                            {r.decision?.receipt && <ShieldCheck className="h-3.5 w-3.5 text-mint-deep" aria-label="signed receipt" />}
+                            {r.decision?.receipt && <ShieldCheck className="h-3.5 w-3.5 text-success" aria-label="signed receipt" />}
                           </div>
                         </td>
-                        <td className="td text-neutral-500 text-xs whitespace-nowrap">{formatDate(r.created_at)}</td>
+                        <td className="td text-neutral-500 font-mono text-xs whitespace-nowrap">{formatDate(r.created_at)}</td>
                       </tr>
                       {open && (
-                        <tr className="bg-neutral-50/60">
+                        <tr className="bg-lavender/60">
                           <td></td>
                           <td colSpan={6} className="px-4 py-4">
                             <DecisionDetails request={r} />
@@ -131,15 +131,15 @@ function TransactionsTab() {
   if (txs.error && !txs.data) return <ErrorNote message={txs.error} />
   if (list.length === 0)
     return (
-      <div className="card">
+      <div className="card-lg">
         <EmptyState icon={<ArrowLeftRight className="h-5 w-5" />} title="No transactions yet" description="Approved purchases are charged to a card and show up here." />
       </div>
     )
   return (
-    <div className="card overflow-hidden">
+    <div className="card-lg overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px]">
-          <thead className="bg-neutral-50 border-b border-neutral-200">
+          <thead className="bg-lavender border-b border-line">
             <tr>
               <th className="th">Card</th>
               <th className="th">Provider</th>
@@ -150,12 +150,12 @@ function TransactionsTab() {
               <th className="th">When</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-neutral-100">
+          <tbody className="divide-y divide-line">
             {list.map((t) => (
-              <tr key={t.id} className="hover:bg-neutral-50">
+              <tr key={t.id} className="hover:bg-lavender/70">
                 <td className="td">
-                  <div className="font-medium">{t.card_label}</div>
-                  <div className="text-xs text-neutral-500 tnum">request #{t.purchase_request_id}</div>
+                  <div className="font-semibold">{t.card_label}</div>
+                  <div className="font-mono text-xs text-neutral-500 tnum">request #{t.purchase_request_id}</div>
                 </td>
                 <td className="td">
                   <ProviderBadge provider={t.provider} />
@@ -166,12 +166,12 @@ function TransactionsTab() {
                 </td>
                 <td className="td">
                   <StatusPill status={t.status} />
-                  {t.decline_reason && <div className="text-xs text-red-600 mt-1">{t.decline_reason}</div>}
+                  {t.decline_reason && <div className="text-xs text-danger mt-1">{t.decline_reason}</div>}
                 </td>
                 <td className="td">
                   <code className="font-mono text-xs text-neutral-600">{t.provider_ref}</code>
                 </td>
-                <td className="td text-neutral-500 text-xs whitespace-nowrap">{formatDate(t.created_at)}</td>
+                <td className="td text-neutral-500 font-mono text-xs whitespace-nowrap">{formatDate(t.created_at)}</td>
               </tr>
             ))}
           </tbody>
@@ -185,8 +185,8 @@ export default function TransactionsPage() {
   const [tab, setTab] = useState<'requests' | 'transactions'>('requests')
   return (
     <div>
-      <PageHeader title="Purchase requests and transactions" subtitle="Every request an AI employee made, the decision it got, and the money that actually moved." />
-      <div className="inline-flex rounded-lg border border-neutral-200 bg-white p-1 mb-5">
+      <PageHeader title="Activity" subtitle="Every request an AI employee made, the decision it got, and the money that actually moved." />
+      <div className="inline-flex rounded-pill border border-line bg-white p-1 mb-5">
         {(
           [
             ['requests', 'Purchase requests'],
@@ -196,7 +196,7 @@ export default function TransactionsPage() {
           <button
             key={k}
             onClick={() => setTab(k)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${tab === k ? 'bg-brand text-white' : 'text-neutral-600 hover:bg-neutral-100'}`}
+            className={`rounded-pill px-3.5 py-1.5 text-sm font-semibold transition-colors ${tab === k ? 'bg-brand-light text-brand' : 'text-neutral-600 hover:bg-lavender'}`}
           >
             {label}
           </button>

@@ -6,7 +6,7 @@ from app.schemas import AgentOut, ApprovedBy, DepartmentOut, PurchaseRequestOut,
 
 def department_out(d: Department) -> DepartmentOut:
     return DepartmentOut(id=d.id, name=d.name, monthly_budget=d.monthly_budget, spent_this_period=d.spent_this_period,
-                         remaining=d.remaining, period_start=d.period_start, agent_count=len(d.agents))
+                         remaining=d.remaining, period_start=d.period_start, spending_paused=d.spending_paused, agent_count=len(d.agents))
 
 
 def agent_out(a: Agent) -> AgentOut:

@@ -35,6 +35,7 @@ class DepartmentBudget:
     name: str
     monthly_budget: int
     spent_this_period: int
+    spending_paused: bool = False
 
     @property
     def remaining(self) -> int:

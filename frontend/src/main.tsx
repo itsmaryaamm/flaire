@@ -6,6 +6,9 @@ import { AuthProvider } from './lib/auth'
 import { ToastProvider } from './lib/toast'
 import './index.css'
 
+import { registerServiceWorker } from './lib/push'
+void registerServiceWorker()
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter>

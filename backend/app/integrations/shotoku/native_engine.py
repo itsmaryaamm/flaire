@@ -48,6 +48,8 @@ class NativeEngine:
         # 1. Hard stops
         if req.kill_switch:
             return self._deny(req, "kill-switch", ["Company kill switch is ON. All new AI spending is disabled."])
+        if d.spending_paused:
+            return self._deny(req, "department-paused", [f"Spending for the {d.name} department is paused."])
         if a.status != "active":
             return self._deny(req, "agent-paused", [f"Agent '{a.agent_name}' is paused."])
         if req.amount <= 0:
@@ -115,6 +117,8 @@ class NativeEngine:
         # Re-check hard stops and budgets at approval time; a human cannot lift a kill switch or a budget by approving.
         if req.kill_switch:
             return self._deny(req, "kill-switch", ["Kill switch is ON; approvals are frozen."])
+        if req.department.spending_paused:
+            return self._deny(req, "department-paused", [f"Spending for {req.department.name} is paused."])
         if req.amount > req.department.remaining:
             return self._deny(req, "department-budget", [f"Budget no longer covers this: {sar(req.department.remaining)} remaining."])
         return self._approve(req, "human-approved", [f"Approved by {approver}."])

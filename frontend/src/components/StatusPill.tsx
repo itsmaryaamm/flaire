@@ -1,14 +1,15 @@
 import type { ReactNode } from 'react'
 
-export type PillTone = 'green' | 'amber' | 'red' | 'neutral' | 'blue' | 'mint'
+export type PillTone = 'green' | 'amber' | 'red' | 'neutral' | 'blue' | 'mint' | 'lavender'
 
 const toneClasses: Record<PillTone, string> = {
-  green: 'bg-mint text-brand-dark border-mint-deep/20',
-  mint: 'bg-mint text-brand-dark border-mint-deep/20',
-  amber: 'bg-amber-100 text-amber-800 border-amber-300/60',
-  red: 'bg-red-100 text-red-700 border-red-300/60',
-  neutral: 'bg-neutral-100 text-neutral-700 border-neutral-300/60',
-  blue: 'bg-sky-100 text-sky-800 border-sky-300/60',
+  green: 'bg-success-tint text-success',
+  mint: 'bg-success-tint text-success',
+  amber: 'bg-warn-tint text-warn',
+  red: 'bg-danger-tint text-danger',
+  lavender: 'bg-brand-light text-brand',
+  neutral: 'bg-lavender-deep text-neutral-600',
+  blue: 'bg-brand-light text-brand-deep',
 }
 
 /** Maps any status string from the API onto a visual tone. */
@@ -33,14 +34,37 @@ export function toneFor(status: string | null | undefined): PillTone {
     case 'frozen':
     case 'broken':
       return 'red'
+    case 'auto_approved':
+      return 'lavender'
     default:
       return 'neutral'
   }
 }
 
+const LABELS: Record<string, string> = {
+  completed: 'Paid',
+  settled: 'Paid',
+  authorized: 'Paid',
+  pending_approval: 'Awaiting you',
+  pending: 'Pending',
+  denied: 'Declined',
+  rejected: 'Declined',
+  declined: 'Declined',
+  failed: 'Payment failed',
+  approved: 'Approved',
+  auto_approved: 'Auto-approved',
+  reversed: 'Reversed',
+  active: 'Active',
+  paused: 'Paused',
+  frozen: 'Frozen',
+}
+
 export function labelFor(status: string | null | undefined): string {
-  if (!status) return 'unknown'
-  return status.replace(/_/g, ' ')
+  if (!status) return 'Unknown'
+  const known = LABELS[status]
+  if (known) return known
+  const plain = status.replace(/_/g, ' ')
+  return plain.charAt(0).toUpperCase() + plain.slice(1)
 }
 
 export function StatusPill({
@@ -48,7 +72,7 @@ export function StatusPill({
   tone,
   children,
   className = '',
-  dot = true,
+  dot = false,
 }: {
   status?: string | null
   tone?: PillTone
@@ -59,7 +83,7 @@ export function StatusPill({
   const t = tone ?? toneFor(status)
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium capitalize whitespace-nowrap ${toneClasses[t]} ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-pill px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${toneClasses[t]} ${className}`}
     >
       {dot && <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />}
       {children ?? labelFor(status)}

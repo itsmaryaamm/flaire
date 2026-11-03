@@ -90,7 +90,7 @@ export default function AgentsPage() {
       ) : agents.error && !agents.data ? (
         <ErrorNote message={agents.error} />
       ) : list.length === 0 ? (
-        <div className="card">
+        <div className="card-lg">
           <EmptyState
             icon={<Bot className="h-5 w-5" />}
             title="No AI employees yet"
@@ -105,13 +105,13 @@ export default function AgentsPage() {
       ) : (
         <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           {list.map((a) => (
-            <div key={a.id} className="card p-5 flex flex-col gap-4">
+            <div key={a.id} className="card-lg p-5 flex flex-col gap-4">
               <div className="flex items-start gap-3">
-                <div className="rounded-lg bg-brand-light text-brand p-2.5 shrink-0">
+                <div className="rounded-xl bg-brand-light text-brand p-2.5 shrink-0">
                   <Bot className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <Link to={`/agents/${a.id}`} className="font-semibold hover:underline truncate block">
+                  <Link to={`/agents/${a.id}`} className="font-bold hover:text-brand truncate block">
                     {a.name}
                   </Link>
                   <div className="text-xs text-neutral-500 truncate capitalize">
@@ -124,11 +124,11 @@ export default function AgentsPage() {
               <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
                 <div>
                   <dt className="text-xs text-neutral-500">Per transaction</dt>
-                  <dd className="font-medium tnum">{sar(a.per_transaction_limit)}</dd>
+                  <dd className="font-semibold tnum">{sar(a.per_transaction_limit)}</dd>
                 </div>
                 <div>
                   <dt className="text-xs text-neutral-500">Approval above</dt>
-                  <dd className="font-medium tnum">{sar(a.approval_threshold)}</dd>
+                  <dd className="font-semibold tnum">{sar(a.approval_threshold)}</dd>
                 </div>
                 <div className="col-span-2">
                   <dt className="text-xs text-neutral-500 flex justify-between">
@@ -138,7 +138,7 @@ export default function AgentsPage() {
                     </span>
                   </dt>
                   <dd>
-                    <ProgressBar value={a.spent_this_period} max={a.monthly_limit} className="mt-1.5" />
+                    <ProgressBar value={a.spent_this_period} max={a.monthly_limit} className="mt-1.5" thin />
                   </dd>
                 </div>
                 <div>
@@ -151,7 +151,7 @@ export default function AgentsPage() {
                 </div>
               </dl>
 
-              <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-neutral-100 mt-auto">
+              <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-line mt-auto">
                 <button
                   className="btn-ghost text-xs px-2"
                   onClick={() => toggleStatus(a)}
@@ -167,7 +167,7 @@ export default function AgentsPage() {
                 <button className="btn-ghost text-xs px-2" onClick={() => setRotating(a)}>
                   <RefreshCw className="h-3.5 w-3.5" /> Rotate key
                 </button>
-                <button className="btn-ghost text-xs px-2 text-red-600 hover:bg-red-50" onClick={() => setDeleting(a)}>
+                <button className="btn-ghost text-xs px-2 text-danger hover:bg-danger-tint" onClick={() => setDeleting(a)}>
                   <Trash2 className="h-3.5 w-3.5" /> Delete
                 </button>
                 <Link to={`/agents/${a.id}`} className="btn-ghost text-xs px-2 ml-auto text-brand">

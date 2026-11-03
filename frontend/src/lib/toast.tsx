@@ -53,12 +53,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           <div
             key={t.id}
             role="status"
-            className={`pointer-events-auto flex items-start gap-2 rounded-lg border px-3.5 py-2.5 text-sm shadow-sm bg-white md:min-w-[280px] md:max-w-sm ${
+            className={`pointer-events-auto flex items-start gap-2 rounded-card border px-3.5 py-2.5 text-sm shadow-lg bg-white md:min-w-[280px] md:max-w-sm ${
               t.kind === 'success'
-                ? 'border-mint-deep/30 text-mint-deep'
+                ? 'border-success/30 text-success'
                 : t.kind === 'error'
-                  ? 'border-red-300 text-red-700'
-                  : 'border-neutral-300 text-ink'
+                  ? 'border-danger/40 text-danger'
+                  : 'border-line-strong text-ink'
             }`}
           >
             {t.kind === 'success' ? (

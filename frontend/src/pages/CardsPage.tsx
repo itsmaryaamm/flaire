@@ -16,10 +16,10 @@ import { PageLoader, Spinner } from '../components/Spinner'
 import { ErrorNote } from '../components/ErrorNote'
 
 const cardGradient: Record<string, string> = {
-  mock_snb: 'from-[#0F5132] to-[#1F7A4A]',
-  mock_rajhi: 'from-[#1E3A8A] to-[#2563EB]',
-  mock_riyad: 'from-[#4C1D95] to-[#7C3AED]',
-  lithic: 'from-[#111411] to-[#3F3F46]',
+  mock_snb: 'from-[#7B2FF2] to-[#B145F0]',
+  mock_rajhi: 'from-[#2A0066] to-[#7B2FF2]',
+  mock_riyad: 'from-[#6A22E0] to-[#B145F0]',
+  lithic: 'from-[#1A0B33] to-[#2A0066]',
 }
 
 function CardTile({
@@ -37,18 +37,18 @@ function CardTile({
   return (
     <div className="flex flex-col gap-3">
       <div
-        className={`relative aspect-[1.586/1] rounded-2xl bg-gradient-to-br ${cardGradient[card.provider] ?? 'from-neutral-700 to-neutral-900'} text-white p-5 flex flex-col justify-between overflow-hidden ${frozen ? 'saturate-50' : ''}`}
+        className={`relative aspect-[1.586/1] rounded-card-lg bg-gradient-to-br ${cardGradient[card.provider] ?? 'from-neutral-700 to-neutral-900'} text-white p-5 flex flex-col justify-between overflow-hidden ${frozen ? 'saturate-50' : ''}`}
       >
         <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
         <div className="absolute -right-4 bottom-6 h-24 w-24 rounded-full bg-white/5" />
         <div className="flex items-start justify-between relative">
           <div>
             <div className="text-xs text-white/70">{info.bank}</div>
-            <div className="font-semibold">{card.label}</div>
+            <div className="font-bold">{card.label}</div>
           </div>
           <div className="flex items-center gap-1.5">
             {card.is_default && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-mint text-brand-dark text-[10px] font-semibold px-2 py-0.5">
+              <span className="inline-flex items-center gap-1 rounded-pill bg-white/90 text-brand text-[10px] font-bold px-2 py-0.5">
                 <Star className="h-3 w-3" /> Default
               </span>
             )}
@@ -61,29 +61,29 @@ function CardTile({
         </div>
         <div className="flex items-end justify-between relative">
           <div>
-            <div className="text-[10px] uppercase tracking-wide text-white/60">Available</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/60">Available</div>
             <div className="font-semibold tnum">{sar(card.available_balance)}</div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] uppercase tracking-wide text-white/60">Limit</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/60">Limit</div>
             <div className="text-sm tnum">{sar(card.credit_limit)}</div>
           </div>
         </div>
         {frozen && (
           <div className="absolute inset-0 bg-ink/40 backdrop-blur-[1px] flex items-center justify-center">
-            <span className="inline-flex items-center gap-2 rounded-full bg-white text-ink text-sm font-semibold px-4 py-1.5">
-              <Snowflake className="h-4 w-4 text-sky-600" /> Frozen
+            <span className="inline-flex items-center gap-2 rounded-pill bg-white text-ink text-sm font-semibold px-4 py-1.5">
+              <Snowflake className="h-4 w-4 text-brand" /> Frozen
             </span>
           </div>
         )}
       </div>
-      <div className="card p-3 space-y-2">
-        <ProgressBar value={card.credit_limit - card.available_balance} max={card.credit_limit} />
+      <div className="card p-3.5 space-y-2">
+        <ProgressBar value={card.credit_limit - card.available_balance} max={card.credit_limit} thin />
         <div className="flex items-center justify-between text-xs text-neutral-500">
           <span>{dept ? `Department: ${dept.name}` : 'Company-wide'}</span>
           <StatusPill status={card.status} />
         </div>
-        <div className="flex flex-wrap gap-1 pt-1 border-t border-neutral-100">
+        <div className="flex flex-wrap gap-1 pt-1 border-t border-line">
           <button className="btn-ghost text-xs px-2" onClick={() => onAction('freeze', card)}>
             {frozen ? <Sun className="h-3.5 w-3.5" /> : <Snowflake className="h-3.5 w-3.5" />}
             {frozen ? 'Unfreeze' : 'Freeze'}
@@ -158,7 +158,7 @@ function AddCardForm({ departments, onCancel, onSaved }: { departments: Departme
           {PROVIDERS.map((p) => (
             <label
               key={p.value}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${form.provider === p.value ? 'border-brand bg-brand-light' : 'border-neutral-300 hover:bg-neutral-50'}`}
+              className={`flex items-center gap-2 rounded-input border px-3 py-2 text-sm cursor-pointer ${form.provider === p.value ? 'border-brand bg-brand-light' : 'border-line-strong hover:bg-lavender'}`}
             >
               <input type="radio" name="provider" className="accent-brand" checked={form.provider === p.value} onChange={() => setForm({ ...form, provider: p.value })} />
               {p.label}
@@ -277,7 +277,7 @@ export default function CardsPage() {
       ) : cards.error && !cards.data ? (
         <ErrorNote message={cards.error} />
       ) : list.length === 0 ? (
-        <div className="card">
+        <div className="card-lg">
           <EmptyState
             icon={<CreditCard className="h-5 w-5" />}
             title="No cards yet"

@@ -45,17 +45,17 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`w-full ${width} bg-white rounded-t-2xl sm:rounded-card border border-neutral-200 max-h-[92vh] flex flex-col`}
+        className={`w-full ${width} bg-white rounded-t-card-lg sm:rounded-card-lg border border-line shadow-xl max-h-[92vh] flex flex-col`}
       >
-        <div className="flex items-center justify-between px-5 py-4 border-b border-neutral-200">
-          <h2 className="text-base font-semibold">{title}</h2>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-line">
+          <h2 className="text-base font-bold">{title}</h2>
           <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close">
             <X className="h-4 w-4" />
           </button>
         </div>
         <div className="px-5 py-4 overflow-y-auto">{children}</div>
         {footer && (
-          <div className="px-5 py-3 border-t border-neutral-200 flex flex-wrap justify-end gap-2">
+          <div className="px-5 py-3 border-t border-line flex flex-wrap justify-end gap-2">
             {footer}
           </div>
         )}

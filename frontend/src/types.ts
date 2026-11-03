@@ -178,6 +178,7 @@ export interface DashboardSummary {
     spent_this_period: number
     budget_total: number
     pending_count: number
+    completed_count?: number
     blocked_count: number
     agent_count: number
     card_count: number

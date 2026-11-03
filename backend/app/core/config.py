@@ -34,7 +34,18 @@ class Settings(BaseSettings):
     # Lithic sandbox (optional). Get a sandbox key at https://dashboard.lithic.com
     lithic_api_key: str | None = None
     lithic_base_url: str = "https://sandbox.lithic.com/v1"
-    lithic_webhook_secret: str | None = None  # "whsec_..." from the Lithic dashboard webhook settings
+    lithic_webhook_secret: str | None = None
+
+    # Approval notifications (optional). Without SMTP the notification is recorded in the ledger only.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    dashboard_url: str = "http://localhost:5173"
+    # Web push (optional; generated and stored on first boot if absent)
+    vapid_private_key: str | None = None
+    vapid_public_key: str | None = None  # "whsec_..." from the Lithic dashboard webhook settings
 
     @property
     def cors_origin_list(self) -> list[str]:

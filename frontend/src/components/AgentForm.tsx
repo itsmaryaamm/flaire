@@ -158,8 +158,8 @@ export function AgentForm({
         </div>
       )}
 
-      <fieldset className="rounded-lg border border-neutral-200 p-3 space-y-3">
-        <legend className="px-1 text-xs font-medium text-neutral-500">Spending limits (SAR)</legend>
+      <fieldset className="rounded-card border border-line p-4 space-y-3">
+        <legend className="px-1 mono-label">Spending limits (SAR)</legend>
         <div className="grid sm:grid-cols-3 gap-3">
           <div>
             <label className="label">Per transaction</label>

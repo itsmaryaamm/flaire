@@ -7,6 +7,7 @@ import { useFetch, formatDate } from '../lib/useFetch'
 import { useToast } from '../lib/toast'
 import type { AuditEntry, AuditVerify, Company, Engine } from '../types'
 import { PageHeader } from '../components/PageHeader'
+import { PhoneAppPanel } from '../components/PhoneAppPanel'
 import { KillSwitchPanel } from '../components/KillSwitchPanel'
 import { ErrorNote } from '../components/ErrorNote'
 import { PageLoader, Spinner } from '../components/Spinner'
@@ -136,8 +137,8 @@ export default function SettingsPage() {
       <PageHeader title="Settings" subtitle="Company, authorization engine, emergency controls and the audit ledger." />
 
       <div className="grid lg:grid-cols-2 gap-6">
-        <section className="card p-5">
-          <h3 className="font-semibold mb-3">Company</h3>
+        <section className="card-lg p-5">
+          <h3 className="font-bold mb-3">Company</h3>
           <form onSubmit={saveName} className="flex flex-col sm:flex-row gap-2">
             <div className="flex-1">
               <label className="label" htmlFor="company-name">Company name</label>
@@ -150,17 +151,19 @@ export default function SettingsPage() {
           <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
             <div>
               <dt className="text-xs text-neutral-500">Currency</dt>
-              <dd className="font-medium">{company?.currency ?? 'SAR'}</dd>
+              <dd className="font-semibold">{company?.currency ?? 'SAR'}</dd>
             </div>
             <div>
               <dt className="text-xs text-neutral-500">Created</dt>
-              <dd className="font-medium">{formatDate(company?.created_at, false)}</dd>
+              <dd className="font-semibold">{formatDate(company?.created_at, false)}</dd>
             </div>
           </dl>
         </section>
 
-        <section className="card p-5">
-          <h3 className="font-semibold">Supplier policy</h3>
+        <PhoneAppPanel />
+
+        <section className="card-lg p-5">
+          <h3 className="font-bold">Supplier policy</h3>
           <p className="text-xs text-neutral-500 mt-0.5 mb-3">
             How a finance team actually works: trusted suppliers get paid within limits, unknown suppliers get a look first.
           </p>
@@ -191,18 +194,18 @@ export default function SettingsPage() {
           <p className="text-xs text-neutral-500 mt-1">The first payment to a supplier the company has never paid waits for a human at or above this amount. 0 turns this off.</p>
         </section>
 
-        <section className="card p-5">
-          <h3 className="font-semibold">Approval security</h3>
+        <section className="card-lg p-5">
+          <h3 className="font-bold">Approval security</h3>
           <p className="text-xs text-neutral-500 mt-0.5 mb-3">Enforced by the server on every approval, never by the AI.</p>
           <label className="flex items-start gap-3 text-sm cursor-pointer">
             <input
               type="checkbox"
-              className="mt-1"
+              className="mt-1 accent-brand"
               checked={company?.require_password_on_approve ?? true}
               onChange={(e) => saveSecurity({ require_password_on_approve: e.target.checked })}
             />
             <span>
-              <span className="font-medium">Password re-entry on every approval</span>
+              <span className="font-semibold">Password re-entry on every approval</span>
               <span className="block text-xs text-neutral-500">A stolen session or an unlocked laptop cannot approve spending.</span>
             </span>
           </label>
@@ -236,8 +239,8 @@ export default function SettingsPage() {
           </ul>
         </section>
 
-        <section className="card p-5">
-          <h3 className="font-semibold">Authorization engine</h3>
+        <section className="card-lg p-5">
+          <h3 className="font-bold">Authorization engine</h3>
           <p className="text-xs text-neutral-500 mt-0.5 mb-3">Decides every purchase request. Both engines record the same verdict, reasons and rule id.</p>
           <div className="space-y-2">
             {ENGINES.map((e) => {
@@ -248,14 +251,14 @@ export default function SettingsPage() {
                   type="button"
                   disabled={savingEngine}
                   onClick={() => setEngine(e.value)}
-                  className={`w-full text-left flex items-start gap-3 rounded-lg border px-3 py-3 transition-colors ${active ? 'border-brand bg-brand-light' : 'border-neutral-200 hover:bg-neutral-50'}`}
+                  className={`w-full text-left flex items-start gap-3 rounded-card border px-3 py-3 transition-colors ${active ? 'border-brand bg-brand-light' : 'border-line hover:bg-lavender'}`}
                   aria-pressed={active}
                 >
-                  <span className={`rounded-md p-1.5 ${active ? 'bg-brand text-white' : 'bg-neutral-100 text-neutral-600'}`}>
+                  <span className={`rounded-full p-1.5 ${active ? 'bg-brand text-white' : 'bg-lavender-deep text-neutral-600'}`}>
                     <e.icon className="h-4 w-4" />
                   </span>
                   <span className="flex-1">
-                    <span className="text-sm font-medium flex items-center gap-2">
+                    <span className="text-sm font-semibold flex items-center gap-2">
                       {e.label}
                       {active && <StatusPill tone="green" dot={false}>active</StatusPill>}
                     </span>
@@ -270,15 +273,15 @@ export default function SettingsPage() {
 
       <KillSwitchPanel onChanged={() => void audit.refetch()} />
 
-      <section className="card">
-        <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-neutral-200">
+      <section className="card-lg overflow-hidden">
+        <div className="flex flex-wrap items-center gap-3 px-5 py-4 border-b border-line">
           <ScrollText className="h-4 w-4 text-neutral-500" />
-          <h3 className="font-semibold">Audit ledger</h3>
-          <span className="text-xs text-neutral-500">hash-chained, append-only</span>
+          <h3 className="font-bold">Audit ledger</h3>
+          <span className="font-mono text-[11px] text-neutral-500">hash-chained · append-only</span>
           <div className="ml-auto flex items-center gap-2">
             {verify && (
               <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${verify.ok ? 'bg-mint text-brand-dark' : 'bg-red-100 text-red-700'}`}
+                className={`inline-flex items-center gap-1.5 rounded-pill px-2.5 py-1 text-xs font-semibold ${verify.ok ? 'bg-success-tint text-success' : 'bg-danger-tint text-danger'}`}
               >
                 {verify.ok ? <ShieldCheck className="h-3.5 w-3.5" /> : <ShieldAlert className="h-3.5 w-3.5" />}
                 {verify.ok ? `Chain OK, ${verify.entries} entries` : `Chain broken at entry ${verify.broken_at}`}
@@ -300,7 +303,7 @@ export default function SettingsPage() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px]">
-              <thead className="bg-neutral-50 border-b border-neutral-200">
+              <thead className="bg-lavender border-b border-line">
                 <tr>
                   <th className="th">Time</th>
                   <th className="th">Actor</th>
@@ -309,10 +312,10 @@ export default function SettingsPage() {
                   <th className="th">Hash</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-neutral-100">
+              <tbody className="divide-y divide-line">
                 {(audit.data ?? []).map((e) => (
-                  <tr key={e.id} className={verify && !verify.ok && verify.broken_at === e.id ? 'bg-red-50' : 'hover:bg-neutral-50'}>
-                    <td className="td text-xs text-neutral-500 whitespace-nowrap">{formatDate(e.ts)}</td>
+                  <tr key={e.id} className={verify && !verify.ok && verify.broken_at === e.id ? 'bg-danger-tint' : 'hover:bg-lavender/70'}>
+                    <td className="td font-mono text-xs text-neutral-500 whitespace-nowrap">{formatDate(e.ts)}</td>
                     <td className="td">
                       <span className="inline-flex items-center gap-1.5 text-sm">
                         <ActorIcon type={e.actor_type} />
@@ -320,7 +323,7 @@ export default function SettingsPage() {
                       </span>
                     </td>
                     <td className="td">
-                      <code className="font-mono text-xs bg-neutral-100 px-1.5 py-0.5 rounded">{e.event}</code>
+                      <code className="font-mono text-xs bg-lavender-deep px-1.5 py-0.5 rounded">{e.event}</code>
                     </td>
                     <td className="td text-xs text-neutral-600 max-w-md">{summariseDetails(e.details)}</td>
                     <td className="td">
