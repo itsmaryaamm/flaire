@@ -29,6 +29,12 @@ def company_of(user: User, db: Session) -> Company:
     return db.get(Company, user.company_id)
 
 
+def company_out(c: Company) -> CompanyOut:
+    out = CompanyOut.model_validate(c)
+    out.lithic_configured = bool(c.lithic_api_key_enc) or bool(settings.lithic_api_key)
+    return out
+
+
 # ====================================================== auth
 @router.post("/auth/register", response_model=AuthOut, status_code=201, tags=["auth"])
 def register(body: RegisterIn, db: Session = Depends(get_db)):
@@ -42,7 +48,7 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
     db.flush()
     audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="company.created", details={"name": company.name})
     db.commit()
-    return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=CompanyOut.model_validate(company))
+    return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=company_out(company))
 
 
 @router.post("/auth/login", response_model=AuthOut, tags=["auth"])
@@ -52,18 +58,18 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "Invalid email or password")
     company = company_of(user, db)
-    return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=CompanyOut.model_validate(company))
+    return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=company_out(company))
 
 
 @router.get("/auth/me", tags=["auth"])
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return {"user": UserOut.model_validate(user), "company": CompanyOut.model_validate(company_of(user, db))}
+    return {"user": UserOut.model_validate(user), "company": company_out(company_of(user, db))}
 
 
 # ====================================================== company
 @router.get("/company", response_model=CompanyOut, tags=["company"])
 def get_company(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return company_of(user, db)
+    return company_out(company_of(user, db))
 
 
 @router.patch("/company", response_model=CompanyOut, tags=["company"])
@@ -74,7 +80,11 @@ def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db
     if body.engine:
         c.engine = body.engine
         audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="engine.changed", details={"engine": body.engine})
-    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from")}
+    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from", "notify_threshold")}
+    if body.lithic_api_key is not None:
+        from app.core.crypto import encrypt
+        c.lithic_api_key_enc = encrypt(body.lithic_api_key.strip()) if body.lithic_api_key.strip() else None
+        audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="payments.lithic_key_set" if body.lithic_api_key.strip() else "payments.lithic_key_removed", details={})
     if "trusted_merchants" in sec:
         sec["trusted_merchants"] = [m.strip() for m in sec["trusted_merchants"] if m.strip()][:200]
     for k, v in sec.items():
@@ -83,12 +93,12 @@ def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db
         audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="security.updated", details=sec)
     db.commit()
     db.refresh(c)
-    return c
+    return company_out(c)
 
 
 @router.post("/company/kill-switch", response_model=CompanyOut, tags=["company"])
 def kill_switch(body: KillSwitchIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
-    return set_kill_switch(db, company_of(user, db), user, body.enabled, body.reason)
+    return company_out(set_kill_switch(db, company_of(user, db), user, body.enabled, body.reason))
 
 
 # ====================================================== departments
@@ -334,7 +344,7 @@ def create_card(body: CardIn, user: User = Depends(require_approver), db: Sessio
     if body.department_id:
         _dept(db, user, body.department_id)
     try:
-        info = get_adapter(body.provider).create_card(body.label, body.credit_limit, "SAR")
+        info = get_adapter(body.provider, company_of(user, db)).create_card(body.label, body.credit_limit, "SAR")
     except Exception as exc:
         raise HTTPException(400, str(exc))
     if body.is_default:
@@ -399,7 +409,7 @@ def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_
     by_day = {str(d): int(s or 0) for d, s in rows}
     days = [(datetime.now(timezone.utc) - timedelta(days=i)).date() for i in range(13, -1, -1)]
     return {
-        "company": CompanyOut.model_validate(c),
+        "company": company_out(c),
         "kill_switch": c.kill_switch,
         "totals": {
             "spent_this_period": sum(d.spent_this_period for d in depts),
@@ -524,3 +534,34 @@ def push_test(user: User = Depends(get_current_user), db: Session = Depends(get_
     result = send_to_company_approvers(db, user.company_id, "Flaire test", "Push notifications are working on this device.", f"{settings.dashboard_url}/approvals")
     db.commit()
     return result
+
+
+# ====================================================== connected Claudes (OAuth connections)
+@router.get("/connections", tags=["connector"])
+def list_connections(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models import OAuthToken
+    rows = db.query(OAuthToken).filter(OAuthToken.company_id == user.company_id, OAuthToken.revoked.is_(False)).order_by(OAuthToken.id.desc()).all()
+    out = []
+    for t in rows:
+        ag = db.get(Agent, t.agent_id)
+        u = db.get(User, t.user_id)
+        out.append({"id": t.id, "agent_id": t.agent_id, "agent_name": ag.name if ag else "?", "connected_by": u.full_name if u else "?",
+                    "client": t.client_id if not t.client_id.startswith("fcl_") else "Claude", "created_at": t.created_at, "last_used_at": t.last_used_at, "expires_at": t.expires_at})
+    return out
+
+
+@router.delete("/connections/{conn_id}", status_code=204, tags=["connector"])
+def revoke_connection(conn_id: int, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    from app.models import OAuthToken
+    t = db.query(OAuthToken).filter(OAuthToken.id == conn_id, OAuthToken.company_id == user.company_id).first()
+    if not t:
+        raise HTTPException(404, "Connection not found")
+    t.revoked = True
+    audit.record(db, user.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="connector.revoked", details={"connection_id": t.id, "agent_id": t.agent_id})
+    db.commit()
+
+
+@router.get("/connector-info", tags=["connector"])
+def connector_info(request: Request, user: User = Depends(get_current_user)):
+    from app.api.oauth import base_url
+    return {"url": f"{base_url(request)}/api/v1/mcp", "auth": "Sign in now", "steps": ["Claude → Settings → Connectors → Add custom connector", "Name: Flaire. URL: the one above. Authentication: Sign in now.", "Click Add, sign in with your Flaire email and password, choose which AI employee this Claude is."]}

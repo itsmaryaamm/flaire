@@ -93,7 +93,7 @@ def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amou
 
     if decision.approved:
         execute_payment(db, company, pr, decision)
-    elif decision.verdict == "pending_approval":
+    elif decision.verdict == "pending_approval" and pr.amount >= (company.notify_threshold or 0):
         from app.core.notify import notify_approval_needed
         db.flush()
         notify_approval_needed(db, company, pr)
@@ -143,7 +143,7 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
         pr.decision = {**pr.decision, "payment_error": "Budget was consumed by a concurrent purchase."}
         audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.rejected", details={"request_id": pr.id, "reasons": ["concurrent budget exhaustion"]})
         return None
-    adapter = get_adapter(card.provider)
+    adapter = get_adapter(card.provider, company)
     result = adapter.authorize(card, pr.amount, pr.merchant, f"FLAIRE*{pr.merchant}")
     tx = Transaction(company_id=company.id, purchase_request_id=pr.id, card_id=card.id, provider=card.provider, provider_ref=result.provider_ref,
                      amount=pr.amount, currency=pr.currency, merchant=pr.merchant, status=result.status, decline_reason=result.decline_reason)
@@ -239,7 +239,7 @@ def set_kill_switch(db: Session, company: Company, user: User, enabled: bool, re
             frozen_ids.append(card.id)
             if card.provider == "lithic":
                 try:
-                    get_adapter("lithic").set_state(card, "PAUSED")
+                    get_adapter("lithic", company).set_state(card, "PAUSED")
                 except Exception as exc:  # issuer unreachable: Flaire's own freeze still blocks payment
                     audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="card.pause_failed", details={"card_id": card.id, "error": str(exc)})
         company.kill_switch_frozen_cards = frozen_ids
@@ -250,7 +250,7 @@ def set_kill_switch(db: Session, company: Company, user: User, enabled: bool, re
                 card.status = "active"
                 if card.provider == "lithic":
                     try:
-                        get_adapter("lithic").set_state(card, "OPEN")
+                        get_adapter("lithic", company).set_state(card, "OPEN")
                     except Exception as exc:
                         audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="card.unpause_failed", details={"card_id": card.id, "error": str(exc)})
         company.kill_switch_frozen_cards = []

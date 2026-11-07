@@ -23,6 +23,10 @@ services:
         generateValue: true
       - key: RECEIPT_SECRET
         generateValue: true
+      - key: APP_ENCRYPTION_KEY
+        generateValue: true
+      - key: API_BASE_URL
+        value: https://flaire-api.onrender.com   # replace with this service's URL
       - key: AUTH_ENGINE
         value: native
       - key: CORS_ORIGINS

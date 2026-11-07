@@ -47,6 +47,8 @@ class CompanyOut(BaseModel):
     two_person_threshold: int = 250_000
     trusted_merchants: list[str] = []
     new_merchant_review_from: int = 20_000
+    notify_threshold: int = 0
+    lithic_configured: bool = False
     created_at: UtcDatetime
     model_config = {"from_attributes": True}
 
@@ -65,6 +67,8 @@ class CompanyPatch(BaseModel):
     two_person_threshold: int | None = Field(default=None, ge=0)
     trusted_merchants: list[str] | None = None
     new_merchant_review_from: int | None = Field(default=None, ge=0)
+    notify_threshold: int | None = Field(default=None, ge=0)
+    lithic_api_key: str | None = None   # write-only; empty string removes
 
     @field_validator("engine")
     @classmethod

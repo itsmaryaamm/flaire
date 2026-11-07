@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.mcp import router as mcp_router
+from app.api.oauth import router as oauth_router, well_known
 from app.api.routes import router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import get_settings
@@ -30,6 +31,8 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(router, prefix="/api/v1")
 app.include_router(mcp_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
+app.include_router(oauth_router, prefix="/api/v1")
+app.include_router(well_known)
 
 
 @app.get("/api/v1/health", tags=["health"])

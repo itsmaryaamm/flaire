@@ -7,6 +7,8 @@ Principle: the AI explains and requests. The server decides. Money moves only on
 | Control | Where | Test |
 |---|---|---|
 | Agent keys hashed (SHA-256), shown once, rotatable, optional expiry | core/security.py, api/routes.py | test_key_expiry |
+| Connector sign-in: OAuth 2.1, PKCE S256 required, single-use 10 min codes, hashed 90-day tokens bound to one agent, revocable from Settings, redirect URIs validated | api/oauth.py | test_oauth_connector_sign_in_flow |
+| Payment provider keys stored encrypted per company (Fernet), write-only in the API | core/crypto.py | test_company_lithic_key_and_notify_threshold |
 | Agent keys cannot reach any human endpoint (approvals, limits, cards, kill switch) | security.get_current_user vs get_current_agent | test_agent_key_cannot_reach_human_routes |
 | Rate limit 60/min per agent key on /agent/* and /mcp/*; 10 logins per 15 min per IP | core/guard.py | test_bad_key_lockout_and_rate_limit |
 | Bad-key lockout: 8 wrong keys from one IP locks it for 15 min | core/guard.py | same |

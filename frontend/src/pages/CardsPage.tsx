@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Plus, Snowflake, Sun, Star, PlusCircle, CreditCard, Wifi } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Plus, Snowflake, Sun, Star, PlusCircle, CreditCard, Wifi, AlertTriangle } from 'lucide-react'
 import { api, errorMessage } from '../lib/api'
+import { useAuth } from '../lib/auth'
 import { useFetch } from '../lib/useFetch'
 import { useToast } from '../lib/toast'
 import { fromHalalas, sar, toHalalas } from '../lib/money'
@@ -105,6 +107,8 @@ function CardTile({
 }
 
 function AddCardForm({ departments, onCancel, onSaved }: { departments: Department[]; onCancel: () => void; onSaved: () => void }) {
+  const { company } = useAuth()
+  const lithicReady = !!company?.lithic_configured
   const [form, setForm] = useState({
     label: '',
     provider: 'mock_snb' as CardProvider,
@@ -165,8 +169,20 @@ function AddCardForm({ departments, onCancel, onSaved }: { departments: Departme
             </label>
           ))}
         </div>
-        {form.provider === 'lithic' && (
-          <p className="text-xs text-neutral-500 mt-2">Flaire creates a real sandbox card via Lithic and stores its token. Requires LITHIC_API_KEY on the backend.</p>
+        {form.provider === 'lithic' && lithicReady && (
+          <p className="text-xs text-neutral-500 mt-2">Flaire creates a real sandbox card via Lithic and stores its token.</p>
+        )}
+        {form.provider === 'lithic' && !lithicReady && (
+          <div className="mt-2 flex items-start gap-2 rounded-input border border-amber-300 bg-warn-tint px-3 py-2 text-xs text-warn">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
+            <span>
+              Add your Lithic key in{' '}
+              <Link to="/settings" className="font-semibold underline">
+                Settings → Payments
+              </Link>{' '}
+              first.
+            </span>
+          </div>
         )}
       </div>
       <div className="grid sm:grid-cols-2 gap-3">
@@ -199,7 +215,7 @@ function AddCardForm({ departments, onCancel, onSaved }: { departments: Departme
       <ErrorNote message={error} />
       <div className="flex justify-end gap-2">
         <button type="button" className="btn-secondary" onClick={onCancel} disabled={busy}>Cancel</button>
-        <button type="submit" className="btn-primary" disabled={busy}>
+        <button type="submit" className="btn-primary" disabled={busy || (form.provider === 'lithic' && !lithicReady)}>
           {busy && <Spinner />} Add card
         </button>
       </div>

@@ -28,6 +28,8 @@ class Company(Base):
     # Finance policy: trusted suppliers pay without category checks (still within limits); unknown suppliers get a look first.
     trusted_merchants: Mapped[list] = mapped_column(JSON, default=list)
     new_merchant_review_from: Mapped[int] = mapped_column(Integer, default=20_000)  # halalas; 0 disables new-merchant review
+    notify_threshold: Mapped[int] = mapped_column(Integer, default=0)  # halalas; push/email approvers only for holds at/above this
+    lithic_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted, entered in Settings → Payments
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     users: Mapped[list[User]] = relationship(back_populates="company")
@@ -210,3 +212,45 @@ class VapidKey(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     private_pem: Mapped[str] = mapped_column(Text)
     public_key: Mapped[str] = mapped_column(String(200))
+
+
+class OAuthClient(Base):
+    __tablename__ = "oauth_clients"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    client_id: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    client_name: Mapped[str] = mapped_column(String(120))
+    redirect_uris: Mapped[list] = mapped_column(JSON, default=list)
+    token_endpoint_auth_method: Mapped[str] = mapped_column(String(30), default="none")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class OAuthCode(Base):
+    __tablename__ = "oauth_codes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    client_id: Mapped[str] = mapped_column(String(300))
+    redirect_uri: Mapped[str] = mapped_column(Text)
+    code_challenge: Mapped[str] = mapped_column(String(200))
+    scope: Mapped[str] = mapped_column(String(100), default="purchases")
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"))
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"))
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class OAuthToken(Base):
+    """A connected Claude (or other MCP client) acting as one AI employee. Revocable from the dashboard."""
+    __tablename__ = "oauth_tokens"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    access_hash: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    refresh_hash: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    client_id: Mapped[str] = mapped_column(String(300))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"), index=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    scope: Mapped[str] = mapped_column(String(100), default="purchases")
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

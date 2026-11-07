@@ -9,6 +9,9 @@ import type { AuditEntry, AuditVerify, Company, Engine } from '../types'
 import { PageHeader } from '../components/PageHeader'
 import { PhoneAppPanel } from '../components/PhoneAppPanel'
 import { KillSwitchPanel } from '../components/KillSwitchPanel'
+import { ConnectClaudeCard } from '../components/settings/ConnectClaudeCard'
+import { PaymentsCard } from '../components/settings/PaymentsCard'
+import { NotifyThresholdCard } from '../components/settings/NotifyThresholdCard'
 import { ErrorNote } from '../components/ErrorNote'
 import { PageLoader, Spinner } from '../components/Spinner'
 import { EmptyState } from '../components/EmptyState'
@@ -134,7 +137,7 @@ export default function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" subtitle="Company, authorization engine, emergency controls and the audit ledger." />
+      <PageHeader title="Settings" subtitle="Company, Claude connections, payments, notifications, authorization engine, emergency controls and the audit ledger." />
 
       <div className="grid lg:grid-cols-2 gap-6">
         <section className="card-lg p-5">
@@ -161,6 +164,12 @@ export default function SettingsPage() {
         </section>
 
         <PhoneAppPanel />
+
+        <ConnectClaudeCard />
+
+        <PaymentsCard />
+
+        <NotifyThresholdCard />
 
         <section className="card-lg p-5">
           <h3 className="font-bold">Supplier policy</h3>

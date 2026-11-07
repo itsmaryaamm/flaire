@@ -15,12 +15,36 @@ export interface Company {
   name: string
   currency: 'SAR'
   kill_switch: boolean
+  kill_switch_reason?: string | null
   engine: Engine
   require_password_on_approve: boolean
   two_person_threshold: number
   trusted_merchants: string[]
   new_merchant_review_from: number
+  /** Approvers are notified (push + email) only for holds at or above this amount, in halalas. */
+  notify_threshold: number
+  /** True when a Lithic sandbox API key is stored for this company. The key itself is never returned. */
+  lithic_configured: boolean
   created_at: string
+}
+
+/** GET /connector-info: how to connect a Claude client to this company's Flaire MCP endpoint. */
+export interface ConnectorInfo {
+  url: string
+  auth: string
+  steps: string[]
+}
+
+/** GET /connections: a Claude client linked to one AI employee. */
+export interface Connection {
+  id: number
+  agent_id: number
+  agent_name: string
+  connected_by: string
+  client: string
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
 }
 
 export interface AuthResponse {

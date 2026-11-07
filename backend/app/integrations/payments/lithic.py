@@ -36,18 +36,20 @@ from app.models import Card
 class LithicAdapter:
     provider = "lithic"
 
-    def __init__(self) -> None:
+    def __init__(self, api_key: str | None = None) -> None:
+        """api_key: the company's own key from Settings → Payments; falls back to LITHIC_API_KEY in the environment."""
         self.settings = get_settings()
-        self.enabled = self.settings.lithic_enabled
+        self.api_key = api_key or self.settings.lithic_api_key
+        self.enabled = bool(self.api_key)
         self.base = self.settings.lithic_base_url.rstrip("/")
 
     def _client(self) -> httpx.Client:
-        return httpx.Client(base_url=self.base, headers={"Authorization": self.settings.lithic_api_key or "", "Content-Type": "application/json"}, timeout=20)
+        return httpx.Client(base_url=self.base, headers={"Authorization": self.api_key or "", "Content-Type": "application/json"}, timeout=20)
 
     # ---------------- cards ----------------
     def create_card(self, label: str, credit_limit: int, currency: str) -> dict:
         if not self.enabled:
-            raise RuntimeError("LITHIC_API_KEY is not configured. Add a sandbox key to .env to create Lithic cards.")
+            raise RuntimeError("No Lithic key. Add your Lithic sandbox API key in Settings → Payments first.")
         with self._client() as c:
             r = c.post("/cards", headers={"Idempotency-Key": str(uuid.uuid4())},
                        json={"type": "VIRTUAL", "memo": label[:50], "spend_limit": credit_limit, "spend_limit_duration": "MONTHLY", "state": "OPEN"})
@@ -73,7 +75,7 @@ class LithicAdapter:
     # ---------------- payments ----------------
     def authorize(self, card: Card, amount: int, merchant: str, descriptor: str) -> PaymentResult:
         if not self.enabled:
-            return PaymentResult(False, "declined", "lithic_disabled", "LITHIC_API_KEY not configured")
+            return PaymentResult(False, "declined", "lithic_disabled", "No Lithic key configured for this company")
         if card.status != "active":
             return PaymentResult(False, "declined", "lithic_frozen", f"Card is {card.status}")
         with self._client() as c:

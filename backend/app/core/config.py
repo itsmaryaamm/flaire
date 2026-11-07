@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     # Shared secret for Shotoku-format signed receipts. The payment service refuses to pay without a valid receipt.
     receipt_secret: str = "flaire-dev-receipt-secret"
     receipt_ttl_seconds: int = 300
+    app_encryption_key: str | None = None  # for per-company secrets (payment keys); defaults to JWT_SECRET
+    api_base_url: str = "http://localhost:8000"  # public URL of this API, used in OAuth metadata and connector links
 
     # Claude AI employees
     anthropic_api_key: str | None = None

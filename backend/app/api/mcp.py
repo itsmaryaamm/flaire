@@ -145,6 +145,72 @@ def _agent_from_key(db: Session, key: str, request: Request) -> tuple[Agent | No
         return None, str(exc.detail), exc.status_code
 
 
+def _www_auth(request: Request) -> dict:
+    from app.api.oauth import base_url
+    return {"WWW-Authenticate": f'Bearer resource_metadata="{base_url(request)}/.well-known/oauth-protected-resource/api/v1/mcp"'}
+
+
+def _agent_from_bearer(db: Session, request: Request) -> tuple[Agent | None, str, int]:
+    from app.api.oauth import agent_from_bearer
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        return None, "Sign in required", 401
+    token = auth.split(" ", 1)[1].strip()
+    if token.startswith("flk_"):  # raw agent key also accepted as a bearer
+        return _agent_from_key(db, token, request)
+    from app.core import guard
+    ip = guard.client_ip(request)
+    guard.check_ip_locked(ip)
+    agent = agent_from_bearer(db, token)
+    if not agent:
+        guard.record_bad_key(ip)
+        return None, "Token is invalid, expired or revoked. Reconnect Flaire in Claude.", 401
+    try:
+        guard.check_rate(f"agent:{agent.id}")
+    except HTTPException as exc:
+        return None, str(exc.detail), exc.status_code
+    db.commit()
+    return agent, "", 200
+
+
+async def _serve(agent: Agent, request: Request, db: Session):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(_rpc_error(None, -32700, "Parse error"), status_code=400)
+    from app.core.guard import client_ip
+    CURRENT_IP.set(client_ip(request))
+    messages = body if isinstance(body, list) else [body]
+    responses = [r for r in (_handle(db, agent, m) for m in messages if isinstance(m, dict)) if r is not None]
+    if not responses:
+        return Response(status_code=202)
+    return JSONResponse(responses[0] if not isinstance(body, list) else responses)
+
+
+@router.post("/mcp", tags=["mcp"], include_in_schema=False)
+async def mcp_post_bearer(request: Request, db: Session = Depends(get_db)):
+    """The connector everyone uses: one URL, sign in with your Flaire account."""
+    agent, err, code = _agent_from_bearer(db, request)
+    if not agent:
+        return JSONResponse(_rpc_error(None, -32001, err), status_code=code, headers=_www_auth(request) if code == 401 else None)
+    return await _serve(agent, request, db)
+
+
+@router.get("/mcp", tags=["mcp"], include_in_schema=False)
+async def mcp_get_bearer(request: Request, db: Session = Depends(get_db)):
+    agent, err, code = _agent_from_bearer(db, request)
+    if not agent:
+        return JSONResponse({"name": "flaire", "message": "Add this URL as a custom connector in Claude and choose Sign in. You will log in with your Flaire account."},
+                            status_code=401, headers=_www_auth(request))
+    company = db.get(Company, agent.company_id)
+    return {"ok": True, "name": "flaire", "company": company.name, "agent": agent.name}
+
+
+@router.delete("/mcp", include_in_schema=False)
+async def mcp_delete_bearer():
+    return Response(status_code=204)
+
+
 @router.post("/mcp/{agent_key}", tags=["mcp"], include_in_schema=False)
 async def mcp_post(agent_key: str, request: Request, db: Session = Depends(get_db)):
     agent, err, code = _agent_from_key(db, agent_key, request)

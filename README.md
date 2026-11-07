@@ -53,25 +53,29 @@ cd backend && python -m pytest -q                      # 12 end-to-end tests: mi
 
 Without `ANTHROPIC_API_KEY` the agent runs a deterministic "scripted" plan through the same pipeline, so the demo always works. With the key set, a real Claude model plans and calls the tools.
 
-## Use Flaire from anyone's Claude (MCP connector)
+## Connect any Claude: sign in, no secret links
 
-Every AI employee has a shareable connector link: `https://<your-api>/api/v1/mcp/<agent_key>`.
+Flaire is an MCP connector with OAuth sign-in. Everyone uses the same URL:
 
-1. In the dashboard open an AI employee and click **Get connect link** (or copy it from the key-issued dialog when you create one).
-2. Send the link to anyone. In Claude they go to **Settings → Connectors → Add custom connector**, paste the link, done.
-3. Their Claude now has four tools: `check_budget`, `request_purchase`, `get_purchase_status`, `list_my_requests`. When they ask it to buy something, the request shows up in your dashboard with Flaire's decision. There is no approve tool, so a human in the dashboard stays in control. Rotate the key to revoke the link instantly.
+```
+https://<your-api>/api/v1/mcp
+```
 
-The endpoint speaks MCP Streamable HTTP (JSON responses, stateless), implemented in `backend/app/api/mcp.py`, so it also works with Claude Desktop, Claude Code (`claude mcp add --transport http flaire <link>`) and any other MCP client. The backend must be deployed (Render) for links to work outside your laptop.
+1. In Claude: Settings → Connectors → Add custom connector. Name `Flaire`, paste the URL, Authentication **Sign in now**, Add.
+2. Claude opens Flaire's sign-in page. Log in with your Flaire account and choose which AI employee this Claude is (or let Flaire create "My Claude" with sensible defaults).
+3. Your Claude now has `check_budget`, `request_purchase`, `get_purchase_status` and `list_my_requests`. There is no approve tool. Every request appears in your dashboard and phone view.
 
-## Keeping it fast on every device
+Settings → Connect your Claude shows the URL and every connected Claude, with a Revoke button. Tokens are hashed, bound to one AI employee, expire after 90 days and die instantly on revoke. The older key-in-link form (`/api/v1/mcp/<agent_key>`) still works for scripts and other agent frameworks (also accepted as `Authorization: Bearer flk_...`).
 
-Render's free tier sleeps after 15 minutes idle and takes up to a minute to wake. Two things handle that:
-- The login page wakes the server automatically and shows "Waking up the server" instead of an error.
-- `.github/workflows/keepalive.yml` pings the API every 10 minutes once the repo is on GitHub (Actions must be enabled). Any free uptime pinger (UptimeRobot, cron-job.org) hitting `/api/v1/health` every 10 minutes does the same job.
+Implementation: `backend/app/api/oauth.py` (OAuth 2.1 with PKCE, dynamic client registration, client-ID metadata documents, `/.well-known` discovery) and `backend/app/api/mcp.py` (MCP Streamable HTTP, JSON responses, stateless). Works with Claude.ai, Claude Desktop, Claude Code (`claude mcp add --transport http flaire <url>`) and any MCP client that supports OAuth.
 
-## Flaire on your phone
+## Payments inside Flaire
 
-The dashboard is a responsive web app and installable: on iPhone open it in Safari, Share, Add to Home Screen; on Android Chrome choose Install app. Settings → "Flaire on your phone" turns on push notifications, so approvers get "Approval needed: SAR 3,000 at Jarir" on their phone, tap it, and land on the Approvals page. Approval emails (SMTP in `.env`) carry the same link. Push keys are generated automatically on first boot.
+Settings → Payments takes your Lithic sandbox API key; Flaire stores it encrypted per company (Fernet, key from `APP_ENCRYPTION_KEY`, falling back to `JWT_SECRET`). Cards → Add card → Lithic sandbox then creates a real virtual card in your Lithic sandbox and every approved purchase on it shows up in Lithic's transactions. The environment variable `LITHIC_API_KEY` still works as a global fallback. Later, this screen becomes real card details.
+
+## Phone view
+
+`https://<your-dashboard>/m` is a separate, deliberately simple screen for phones: kill switch toggle, this month's spend, the requests that need you with Approve and Decline (password confirmed), recent activity, and notification settings. Phones landing on the site are sent there automatically; "Full dashboard" switches back. Install it with Add to Home Screen and turn on push: you are notified only for holds at or above the amount you set in "Notify me from SAR".
 
 ## What's in the box
 
@@ -122,6 +126,7 @@ docs/API.md                        API contract
 ```
 
 **Security model** (full table in `docs/SECURITY.md`)
+- Connector sign-in is OAuth 2.1 with PKCE; tokens hashed, agent-bound, 90-day expiry, revocable.
 - Humans use JWT. Agents use `X-Agent-Key` (stored hashed, shown once, rotatable). Agent keys only work on `/agent/*` routes: there is no endpoint an agent can call to approve, change a limit, or touch a card.
 - The engine fails closed. A sidecar outage, a malformed policy or an internal error is a denial.
 - Payment needs a signed receipt bound to agent + merchant + amount with a 5-minute TTL. A tampered or replayed receipt is rejected before any adapter is called.

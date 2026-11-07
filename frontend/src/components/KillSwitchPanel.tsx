@@ -8,7 +8,7 @@ import { Modal } from './Modal'
 import { Spinner } from './Spinner'
 
 /** Shared kill switch state and the confirmation / reason modal. */
-function useKillSwitch(onChanged?: (c: Company) => void) {
+export function useKillSwitch(onChanged?: (c: Company) => void) {
   const { company, setCompany } = useAuth()
   const toast = useToast()
   const [open, setOpen] = useState(false)

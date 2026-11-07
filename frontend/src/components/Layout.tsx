@@ -10,6 +10,7 @@ import {
   LogOut,
   Menu,
   X,
+  Smartphone,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '../lib/auth'
@@ -17,8 +18,11 @@ import { api } from '../lib/api'
 import { useFetch } from '../lib/useFetch'
 import type { DashboardSummary } from '../types'
 import { KillSwitchBanner } from './KillSwitchBanner'
+import { setPreferFullDashboard } from '../lib/prefs'
 
-const nav = [
+type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; end?: boolean; onClick?: () => void }
+
+const nav: NavItem[] = [
   { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
   { to: '/agents', label: 'AI employees', icon: Bot },
   { to: '/budgets', label: 'Departments', icon: PieChart },
@@ -26,6 +30,8 @@ const nav = [
   { to: '/transactions', label: 'Activity', icon: ArrowLeftRight },
   { to: '/cards', label: 'Cards', icon: CreditCard },
   { to: '/settings', label: 'Settings', icon: Settings },
+  // Phone view: the simple approvals screen. Clears the "prefer full dashboard" choice so "/" routes to it again on a phone.
+  { to: '/m', label: 'Phone view', icon: Smartphone, onClick: () => setPreferFullDashboard(false) },
 ]
 
 // The mobile bottom bar shows the 5 most used destinations; the rest live in the sheet menu.
@@ -95,7 +101,7 @@ export function Layout() {
           </div>
           <nav className="flex-1 px-3 space-y-1">
             {nav.map((n) => (
-              <NavLink key={n.to} to={n.to} end={n.end} className={linkClass}>
+              <NavLink key={n.to} to={n.to} end={n.end} className={linkClass} onClick={n.onClick}>
                 <n.icon className="h-4 w-4" />
                 {n.label}
                 {badgeFor(n.to)}
@@ -134,7 +140,16 @@ export function Layout() {
                 onClick={(e) => e.stopPropagation()}
               >
                 {nav.map((n) => (
-                  <NavLink key={n.to} to={n.to} end={n.end} className={linkClass} onClick={() => setMenuOpen(false)}>
+                  <NavLink
+                    key={n.to}
+                    to={n.to}
+                    end={n.end}
+                    className={linkClass}
+                    onClick={() => {
+                      n.onClick?.()
+                      setMenuOpen(false)
+                    }}
+                  >
                     <n.icon className="h-4 w-4" />
                     {n.label}
                     {badgeFor(n.to)}

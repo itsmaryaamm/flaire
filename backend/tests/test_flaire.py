@@ -339,3 +339,73 @@ def test_push_endpoints(ctx):
     t = client.post("/api/v1/push/test", headers=H).json()
     assert t["subscriptions"] == 1  # delivery to a fake endpoint fails, which is fine
     assert client.request("DELETE", "/api/v1/push/subscribe", json={"endpoint": "https://push.example/abc"}, headers=H).status_code == 204
+
+
+def test_oauth_connector_sign_in_flow(ctx):
+    import base64, hashlib, re
+    from urllib.parse import parse_qs, urlparse
+    from app.core import guard
+    guard.reset()
+    H = ctx["H"]
+    # 1. discovery
+    prm = client.get("/.well-known/oauth-protected-resource/api/v1/mcp").json()
+    meta = client.get("/.well-known/oauth-authorization-server").json()
+    assert prm["resource"].endswith("/api/v1/mcp") and "S256" in meta["code_challenge_methods_supported"]
+    # unauthenticated MCP call advertises where to sign in
+    r = client.post("/api/v1/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    assert r.status_code == 401 and "resource_metadata" in r.headers["www-authenticate"]
+    # 2. dynamic client registration
+    reg = client.post("/api/v1/oauth/register", json={"client_name": "Claude", "redirect_uris": ["https://claude.ai/api/mcp/auth_callback"]}).json()
+    cid = reg["client_id"]
+    # 3. authorize page + sign in, creating a new "My Claude" employee
+    verifier = "v" * 50
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip("=")
+    q = {"response_type": "code", "client_id": cid, "redirect_uri": reg["redirect_uris"][0], "state": "xyz", "code_challenge": challenge, "code_challenge_method": "S256", "scope": "purchases"}
+    page = client.get("/api/v1/oauth/authorize", params=q)
+    assert page.status_code == 200 and "Connect your Claude" in page.text
+    bad = client.post("/api/v1/oauth/authorize", data={**q, "email": "owner@test.sa", "password": "nope", "agent": "__new__"})
+    assert bad.status_code == 200 and "Wrong email" in bad.text
+    ok = client.post("/api/v1/oauth/authorize", data={**q, "email": "owner@test.sa", "password": "password123", "agent": "__new__"}, follow_redirects=False)
+    assert ok.status_code == 302
+    loc = urlparse(ok.headers["location"]); qs = parse_qs(loc.query)
+    assert loc.netloc == "claude.ai" and qs["state"] == ["xyz"]
+    code = qs["code"][0]
+    # 4. token exchange (wrong verifier fails, right one works, code single-use)
+    assert client.post("/api/v1/oauth/token", data={"grant_type": "authorization_code", "code": code, "client_id": cid, "redirect_uri": q["redirect_uri"], "code_verifier": "wrong"}).status_code == 400
+    tok = client.post("/api/v1/oauth/token", data={"grant_type": "authorization_code", "code": code, "client_id": cid, "redirect_uri": q["redirect_uri"], "code_verifier": verifier}).json()
+    assert tok["token_type"] == "Bearer" and tok["access_token"].startswith("fat_")
+    assert client.post("/api/v1/oauth/token", data={"grant_type": "authorization_code", "code": code, "client_id": cid, "redirect_uri": q["redirect_uri"], "code_verifier": verifier}).status_code == 400
+    # 5. MCP with bearer: initialize as the new employee, make a purchase
+    B = {"Authorization": f"Bearer {tok['access_token']}"}
+    init = client.post("/api/v1/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}, headers=B).json()
+    assert "My Claude" in init["result"]["instructions"]
+    import json as _json
+    res = client.post("/api/v1/mcp", json={"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "request_purchase", "arguments": {"amount_sar": 50, "merchant": "Google Ads", "category": "advertising", "description": "oauth test"}}}, headers=B).json()
+    assert _json.loads(res["result"]["content"][0]["text"])["status"] == "completed"
+    # 6. visible in the dashboard, revocable, then dead
+    conns = client.get("/api/v1/connections", headers=H).json()
+    assert len(conns) == 1 and conns[0]["agent_name"] == "My Claude"
+    assert client.delete(f"/api/v1/connections/{conns[0]['id']}", headers=H).status_code == 204
+    assert client.post("/api/v1/mcp", json={"jsonrpc": "2.0", "id": 3, "method": "ping"}, headers=B).status_code == 401
+    # 7. refresh token of a revoked connection is dead too
+    assert client.post("/api/v1/oauth/token", data={"grant_type": "refresh_token", "refresh_token": tok["refresh_token"]}).status_code == 400
+
+
+def test_company_lithic_key_and_notify_threshold(ctx):
+    from app.core import guard
+    guard.reset()
+    H = ctx["H"]
+    c = client.patch("/api/v1/company", json={"lithic_api_key": "sk_sandbox_test", "notify_threshold": 100_000}, headers=H).json()
+    assert c["lithic_configured"] is True and c["notify_threshold"] == 100_000
+    from app.core.db import SessionLocal
+    from app.core.crypto import decrypt
+    from app.models import Company
+    db = SessionLocal(); row = db.get(Company, c["id"]); assert row.lithic_api_key_enc != "sk_sandbox_test" and decrypt(row.lithic_api_key_enc) == "sk_sandbox_test"; db.close()
+    # a small hold does not notify, a large one does
+    before = len([e for e in client.get("/api/v1/audit?limit=1000", headers=H).json() if e["event"] == "approval.notified"])
+    pr = buy(ctx, 25_000, merchant="Brand New Vendor", category="advertising")   # new supplier → held, below notify threshold
+    assert pr["status"] == "pending_approval"
+    after = len([e for e in client.get("/api/v1/audit?limit=1000", headers=H).json() if e["event"] == "approval.notified"])
+    assert after == before
+    c = client.patch("/api/v1/company", json={"lithic_api_key": "", "notify_threshold": 0}, headers=H).json()
+    assert c["lithic_configured"] is False
