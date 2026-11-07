@@ -131,6 +131,7 @@ class AgentIn(BaseModel):
     allowed_categories: list[str] = []
     blocked_merchants: list[str] = []
     max_requests_per_hour: int = Field(default=10, ge=1, le=1000)
+    max_requests_per_day: int = Field(default=50, ge=1, le=10_000)
     key_expires_in_days: int | None = Field(default=None, ge=1, le=365)
     cost_center_id: int | None = None
     gl_code: str | None = Field(default=None, max_length=40)
@@ -202,12 +203,22 @@ class RunOut(BaseModel):
 
 
 # ---------- purchases ----------
+MAX_PURCHASE_HALALAS = 1_000_000_000   # SAR 10,000,000: nothing an AI employee asks for is bigger than this
+
+
 class PurchaseIn(BaseModel):
-    amount: int = Field(gt=0, description="halalas")
+    amount: int = Field(gt=0, le=MAX_PURCHASE_HALALAS, description="halalas")
     merchant: str = Field(min_length=1, max_length=200)
     category: str = Field(min_length=1, max_length=60)
-    description: str = ""
+    description: str = Field(default="", max_length=2000)
     card_id: int | None = None
+
+    @field_validator("merchant")
+    @classmethod
+    def _merchant_not_blank(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("merchant must not be blank")
+        return v.strip()
 
 
 class ApprovedBy(BaseModel):
@@ -232,6 +243,7 @@ class PurchaseRequestOut(BaseModel):
     description: str
     status: str
     decision: dict
+    flags: list[str] = []                  # anomaly flags (app.core.velocity); informational, never change the verdict
     transaction_id: int | None
     approved_by: ApprovedBy | None
     approvals: list[ApprovedBy] = []       # for the two-person rule

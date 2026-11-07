@@ -76,7 +76,7 @@ def _budget(db: Session, agent: Agent) -> dict:
 
 def _pr_view(pr: PurchaseRequest) -> dict:
     out = purchase_out(pr).model_dump()
-    return {"request_id": out["id"], "status": out["status"], "verdict": out["decision"].get("verdict"), "reasons": out["decision"].get("reasons", []),
+    return {"request_id": out["id"], "status": out["status"], "verdict": out["decision"].get("verdict"), "reasons": out["decision"].get("reasons", []), "flags": out.get("flags", []),
             "payment_error": out["decision"].get("payment_error"), "amount_sar": out["amount"] / 100, "merchant": out["merchant"],
             "category": out["category"], "created_at": out["created_at"], "approved_by": (out["approved_by"] or {}).get("full_name")}
 
@@ -91,8 +91,11 @@ def _call_tool(db: Session, agent: Agent, name: str, args: dict) -> dict:
             return _text({"error": "amount_sar must be a number"}, True)
         if amount <= 0:
             return _text({"error": "amount_sar must be greater than zero"}, True)
+        from app.schemas import MAX_PURCHASE_HALALAS
+        if amount > MAX_PURCHASE_HALALAS:
+            return _text({"error": f"amount_sar must be at most {MAX_PURCHASE_HALALAS // 100:,}"}, True)
         company = db.get(Company, agent.company_id)
-        pr = submit_purchase_request(db, company, agent, amount=amount, merchant=str(args.get("merchant") or "Unknown")[:200],
+        pr = submit_purchase_request(db, company, agent, amount=amount, merchant=(str(args.get("merchant") or "").strip() or "Unknown")[:200],
                                      category=str(args.get("category") or "other")[:60], description=str(args.get("description") or "")[:2000], card_id=None,
                                      source="mcp", client_ip=CURRENT_IP.get())
         view = _pr_view(pr)

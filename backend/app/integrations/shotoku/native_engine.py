@@ -8,7 +8,8 @@ Shotoku concepts kept on purpose:
   * approved decisions carry a short-lived HMAC receipt in Shotoku's own format
 
 Flaire additions: company kill switch, agent identity/status, per-agent monthly limits, department budgets,
-category allowlists, merchant blocklists, hourly velocity limits and approval thresholds.
+category allowlists, merchant blocklists, hourly and daily velocity limits, split-purchase detection, category
+correction notices, anomaly flags (informational only) and approval thresholds. Receipts are single use.
 
 Order matters: hard denials first, then "needs a human", then approval. A request that trips a denial rule
 is denied even if it would also have needed approval.
@@ -17,7 +18,7 @@ from __future__ import annotations
 
 from app.core.config import get_settings
 from app.integrations.shotoku.interface import AuthorizationRequest, Decision
-from app.integrations.shotoku.receipts import create_receipt, verify_receipt
+from app.integrations.shotoku.receipts import create_receipt, verify_and_consume
 
 
 def sar(halalas: int) -> str:
@@ -58,6 +59,8 @@ class NativeEngine:
 
         # 2. Merchant / category restrictions
         merchant_n, category_n = _norm(req.merchant), _norm(req.category)
+        if req.category_given and _norm(req.category_given) != category_n:
+            reasons.append(f"Category corrected: the agent sent '{req.category_given}' but '{req.merchant}' is a known {req.category} merchant. Judged as {req.category}.")
         for blocked in req.company_blocked_categories:
             b = _norm(blocked)
             if b == category_n or b in merchant_n or b in _norm(req.description):
@@ -86,26 +89,36 @@ class NativeEngine:
             return self._deny(req, "department-budget", reasons + [f"{d.name} budget has {sar(d.remaining)} remaining, request is {sar(req.amount)}."])
         reasons.append(f"{d.name} budget OK ({sar(d.remaining)} remaining).")
 
-        # 4. Velocity
+        # 4. Velocity: hourly and daily caps count every request, including denied ones, because a flood is a flood.
         if a.requests_last_hour >= a.max_requests_per_hour:
             return self._deny(req, "velocity", reasons + [f"Agent hit its velocity limit ({a.max_requests_per_hour} requests/hour)."])
+        if a.max_requests_per_day and a.requests_today >= a.max_requests_per_day:
+            return self._deny(req, "velocity-daily", reasons + [f"Agent hit its daily limit ({a.max_requests_per_day} requests/day)."])
 
-        # 5. Duplicate detection: same merchant and amount within 10 minutes looks like a loop or a replay. A human decides.
+        # 5a. Split purchase: several requests to the same merchant that together exceed the per-purchase limit. Each one alone passed
+        #     the per-transaction check above, so this only ever fires for amounts under the limit. A human decides.
+        combined = a.same_merchant_last_hour + req.amount
+        if a.same_merchant_last_hour > 0 and combined > a.per_transaction_limit:
+            reasons.append(f"Possible split purchase: {sar(combined)} to {req.merchant} in the last hour would exceed the per-purchase limit ({sar(a.per_transaction_limit)}). Human approval required.")
+            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="split-purchase", flags=list(req.flags),
+                            summary=f"Held for approval: looks like one purchase at {req.merchant} split into several.", decision_id=f"dec_{req.request_id}")
+
+        # 5b. Duplicate detection: same merchant and amount within 10 minutes looks like a loop or a replay. A human decides.
         if a.duplicate_recent:
             reasons.append(f"Possible duplicate: {sar(req.amount)} at {req.merchant} was already requested in the last 10 minutes. Human approval required.")
-            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="duplicate-purchase",
+            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="duplicate-purchase", flags=list(req.flags),
                             summary=f"Held for approval: looks like a duplicate of a recent request at {req.merchant}.", decision_id=f"dec_{req.request_id}")
 
         # 6. New supplier review: the company has never paid this merchant and the amount is not trivial.
         if not trusted and req.merchant_is_new and req.new_merchant_review_from and req.amount >= req.new_merchant_review_from:
             reasons.append(f"'{req.merchant}' is a new supplier for the company and {sar(req.amount)} is at or above the new-supplier review amount ({sar(req.new_merchant_review_from)}). Human approval required.")
-            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="new-merchant-review",
+            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="new-merchant-review", flags=list(req.flags),
                             summary=f"Held for approval: first payment to {req.merchant}.", decision_id=f"dec_{req.request_id}")
 
         # 7. Human-in-the-loop threshold
         if req.amount >= a.approval_threshold:
             reasons.append(f"{sar(req.amount)} is at or above the approval threshold ({sar(a.approval_threshold)}). Human approval required.")
-            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="approval-threshold",
+            return Decision(verdict="pending_approval", reasons=reasons, engine=self.name, rule_id="approval-threshold", flags=list(req.flags),
                             summary=f"Held for approval: {sar(req.amount)} at {req.merchant} needs a human sign-off.",
                             decision_id=f"dec_{req.request_id}")
 
@@ -128,17 +141,19 @@ class NativeEngine:
 
     # ---------------- receipts ----------------
     def verify_receipt(self, receipt: str, req: AuthorizationRequest) -> tuple[bool, list[str]]:
-        return verify_receipt(receipt, secret=self.settings.receipt_secret, actor=f"agent-{req.agent.agent_id}",
-                              resource=req.merchant, amount_major=round(req.amount / 100, 2))
+        """Signature, expiry, actor, merchant and amount must all match, and the receipt is consumed: a second
+        verification of the same token (a replay) fails."""
+        return verify_and_consume(receipt, secret=self.settings.receipt_secret, actor=f"agent-{req.agent.agent_id}",
+                                  resource=req.merchant, amount_major=round(req.amount / 100, 2))
 
     # ---------------- helpers ----------------
     def _approve(self, req: AuthorizationRequest, rule_id: str, reasons: list[str]) -> Decision:
         receipt = create_receipt(secret=self.settings.receipt_secret, decision_id=f"dec_{req.request_id}",
                                  actor=f"agent-{req.agent.agent_id}", resource=req.merchant,
                                  amount_major=round(req.amount / 100, 2), ttl_seconds=self.settings.receipt_ttl_seconds)
-        return Decision(verdict="approved", reasons=reasons, engine=self.name, rule_id=rule_id, receipt=receipt,
+        return Decision(verdict="approved", reasons=reasons, engine=self.name, rule_id=rule_id, receipt=receipt, flags=list(req.flags),
                         summary=f"Approved: {sar(req.amount)} at {req.merchant}.", decision_id=f"dec_{req.request_id}")
 
     def _deny(self, req: AuthorizationRequest, rule_id: str, reasons: list[str]) -> Decision:
-        return Decision(verdict="denied", reasons=reasons, engine=self.name, rule_id=rule_id,
+        return Decision(verdict="denied", reasons=reasons, engine=self.name, rule_id=rule_id, flags=list(req.flags),
                         summary=f"Blocked: {reasons[-1]}", decision_id=f"dec_{req.request_id}")

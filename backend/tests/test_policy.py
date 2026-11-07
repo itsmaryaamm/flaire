@@ -115,7 +115,7 @@ def test_tightening_applies_immediately(ctx):
 
 def test_proposer_cannot_approve_own_change(ctx):
     r = client.post(f"/api/v1/policy/changes/{ctx['change_id']}/approve", json={"password": "password123"}, headers=ctx["H"])
-    assert r.status_code == 409 and "different admin" in r.json()["detail"]
+    assert r.status_code == 403 and "different admin" in r.json()["detail"]
 
 
 def test_second_admin_needs_password(ctx):

@@ -27,6 +27,9 @@ class AgentPolicy:
     max_requests_per_hour: int = 10
     requests_last_hour: int = 0
     duplicate_recent: bool = False   # same merchant + amount from this agent in the last 10 minutes
+    max_requests_per_day: int = 50
+    requests_today: int = 0
+    same_merchant_last_hour: int = 0  # halalas this agent already sent (or is waiting to send) to this merchant in the last 60 minutes
 
 
 @dataclass
@@ -58,6 +61,8 @@ class AuthorizationRequest:
     company_trusted_merchants: list[str] = field(default_factory=list)
     merchant_is_new: bool = False            # company has never completed a payment to this merchant
     new_merchant_review_from: int = 20_000   # halalas; 0 disables
+    category_given: str | None = None        # what the agent sent, when it differs from the category Flaire settled on
+    flags: list[str] = field(default_factory=list)   # anomaly flags (app.core.velocity); informational, never change the verdict
 
 
 @dataclass
@@ -69,6 +74,7 @@ class Decision:
     receipt: str | None = None
     summary: str = ""
     decision_id: str | None = None   # engine-side id (Shotoku's dec_...), if any
+    flags: list[str] = field(default_factory=list)   # anomaly flags carried through from the request
 
     @property
     def approved(self) -> bool:

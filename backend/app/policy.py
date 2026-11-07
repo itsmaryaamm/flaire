@@ -285,7 +285,7 @@ def approve_change(db: Session, company: Company, user: User, change: PolicyChan
     if change.status != "pending":
         raise HTTPException(409, f"Change is {change.status}, not pending")
     if change.proposed_by_id == user.id:
-        raise HTTPException(409, "You proposed this change. A different admin must approve it.")
+        raise HTTPException(403, "You proposed this change. A different admin must approve it.")
     if company.require_password_on_approve and not verify_user_password(user, password):
         audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="policy.change_password_failed", details={"change_id": change.id})
         db.commit()

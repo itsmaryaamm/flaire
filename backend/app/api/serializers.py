@@ -36,6 +36,7 @@ def purchase_out(pr: PurchaseRequest) -> PurchaseRequestOut:
     return PurchaseRequestOut(id=pr.id, agent_id=pr.agent_id, agent_name=pr.agent.name if pr.agent else "", department_id=pr.department_id,
                               department_name=pr.department.name if pr.department else "", amount=pr.amount, currency=pr.currency, merchant=pr.merchant,
                               category=pr.category, description=pr.description or "", status=pr.status, decision=pr.decision or {}, transaction_id=pr.transaction_id,
+                              flags=list((pr.decision or {}).get("flags") or []),
                               approved_by=ApprovedBy(id=pr.approved_by.id, full_name=pr.approved_by.full_name) if pr.approved_by else None,
                               approvals=[_approved_by(a) for a in (pr.decision or {}).get("approvals", [])],
                               needs_second_approver=bool((pr.decision or {}).get("needs_second_approver")),

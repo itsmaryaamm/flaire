@@ -36,10 +36,11 @@ def ensure_period(db: Session, company: Company) -> None:
 
 
 # ---------------- authorization ----------------
-def build_authorization_request(db: Session, company: Company, agent: Agent, pr: PurchaseRequest) -> AuthorizationRequest:
+def build_authorization_request(db: Session, company: Company, agent: Agent, pr: PurchaseRequest, category_given: str | None = None) -> AuthorizationRequest:
+    from app.core.velocity import anomaly_flags, velocity_snapshot
     dept = db.get(Department, agent.department_id)
-    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-    recent = (db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id, PurchaseRequest.created_at >= one_hour_ago, PurchaseRequest.id != pr.id).count())
+    velocity = velocity_snapshot(db, agent, pr)
+    flags = anomaly_flags(db, company, agent, pr.merchant, pr.amount, exclude_request_id=pr.id)
     ten_min_ago = datetime.now(timezone.utc) - timedelta(minutes=10)
     duplicate = (db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id, PurchaseRequest.id != pr.id, PurchaseRequest.created_at >= ten_min_ago,
                                                   PurchaseRequest.merchant == pr.merchant, PurchaseRequest.amount == pr.amount,
@@ -50,18 +51,19 @@ def build_authorization_request(db: Session, company: Company, agent: Agent, pr:
         request_id=str(pr.id), company_id=company.id,
         company_trusted_merchants=list(company.trusted_merchants or []), merchant_is_new=merchant_is_new,
         new_merchant_review_from=company.new_merchant_review_from, amount=pr.amount, currency=pr.currency, merchant=pr.merchant, category=pr.category,
-        description=pr.description or "",
+        description=pr.description or "", category_given=category_given, flags=flags,
         agent=AgentPolicy(agent_id=agent.id, agent_name=agent.name, status=agent.status, per_transaction_limit=agent.per_transaction_limit,
                           monthly_limit=agent.monthly_limit, spent_this_period=agent.spent_this_period, approval_threshold=agent.approval_threshold,
                           allowed_categories=list(agent.allowed_categories or []), blocked_merchants=list(agent.blocked_merchants or []),
-                          max_requests_per_hour=agent.max_requests_per_hour, requests_last_hour=recent, duplicate_recent=duplicate),
+                          max_requests_per_hour=agent.max_requests_per_hour, duplicate_recent=duplicate, max_requests_per_day=agent.max_requests_per_day or 50, **velocity),
         department=DepartmentBudget(department_id=dept.id, name=dept.name, monthly_budget=dept.monthly_budget, spent_this_period=dept.spent_this_period, spending_paused=dept.spending_paused),
         kill_switch=company.kill_switch,
     )
 
 
 def decision_to_dict(d: Decision) -> dict:
-    return {"verdict": d.verdict, "engine": d.engine, "reasons": d.reasons, "rule_id": d.rule_id, "receipt": d.receipt, "summary": d.summary, "decision_id": d.decision_id}
+    return {"verdict": d.verdict, "engine": d.engine, "reasons": d.reasons, "rule_id": d.rule_id, "receipt": d.receipt, "summary": d.summary, "decision_id": d.decision_id,
+            "flags": list(d.flags or [])}
 
 
 def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amount: int, merchant: str, category: str, description: str, card_id: int | None,
@@ -78,7 +80,7 @@ def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amou
                  details={"request_id": pr.id, "amount": amount, "merchant": merchant, "category": category_final, "category_given": category, "categorized_by": how, "source": source, "ip": client_ip})
 
     engine = get_engine(company.engine or settings.auth_engine)
-    decision = engine.authorize(build_authorization_request(db, company, agent, pr))
+    decision = engine.authorize(build_authorization_request(db, company, agent, pr, category_given=category if how != "given" else None))
     from app.policy import current_policy_version_id
     pr.policy_version_id = current_policy_version_id(db, company)  # the exact rules this decision was judged against
     pr.decision = {**decision_to_dict(decision), "policy_version": company.policy_version}
@@ -120,7 +122,13 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
     engine = get_engine(decision.engine if decision.engine in ("native", "shotoku") else company.engine)
     auth_req = build_authorization_request(db, company, agent, pr)
 
-    # Gate 1: the receipt must be present, correctly signed, unexpired and match this exact agent/merchant/amount.
+    # Gate 0: one payment per request. A replayed receipt cannot pay the same request twice.
+    if pr.transaction_id is not None or pr.status in ("completed", "failed", "denied", "rejected"):
+        audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.rejected",
+                     details={"request_id": pr.id, "reasons": [f"Request is already {pr.status}; receipt replay refused."]})
+        return None
+
+    # Gate 1: the receipt must be present, correctly signed, unexpired, match this exact agent/merchant/amount and never have been used before.
     valid, reasons = engine.verify_receipt(decision.receipt or "", auth_req) if decision.receipt else (False, ["No authorization receipt."])
     if not valid:
         pr.status = "failed"
