@@ -4,6 +4,8 @@ import { Layout } from './components/Layout'
 import { PageLoader } from './components/Spinner'
 import LoginPage from './pages/LoginPage'
 import RegisterPage from './pages/RegisterPage'
+import ForgotPage from './pages/ForgotPage'
+import ResetPage from './pages/ResetPage'
 import DashboardPage from './pages/DashboardPage'
 import AgentsPage from './pages/AgentsPage'
 import AgentConsolePage from './pages/AgentConsolePage'
@@ -47,6 +49,8 @@ export default function App() {
       <Route element={<PublicOnly />}>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/forgot" element={<ForgotPage />} />
+        <Route path="/reset" element={<ResetPage />} />
       </Route>
       <Route element={<RequireAuth />}>
         <Route path="/m" element={<MobileApp />} />

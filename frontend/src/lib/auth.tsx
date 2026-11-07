@@ -8,7 +8,7 @@ interface AuthState {
   company: Company | null
   loading: boolean
   isAuthenticated: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, code?: string) => Promise<void>
   register: (input: {
     company_name: string
     email: string
@@ -67,8 +67,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const { data } = await api.post<AuthResponse>('/auth/login', { email, password })
+    async (email: string, password: string, code?: string) => {
+      const { data } = await api.post<AuthResponse>('/auth/login', code ? { email, password, code } : { email, password })
       applyAuth(data)
     },
     [applyAuth],

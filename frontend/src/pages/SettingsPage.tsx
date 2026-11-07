@@ -12,6 +12,7 @@ import { KillSwitchPanel } from '../components/KillSwitchPanel'
 import { ConnectClaudeCard } from '../components/settings/ConnectClaudeCard'
 import { PaymentsCard } from '../components/settings/PaymentsCard'
 import { NotifyThresholdCard } from '../components/settings/NotifyThresholdCard'
+import { SecurityCard } from '../components/settings/SecurityCard'
 import { ErrorNote } from '../components/ErrorNote'
 import { PageLoader, Spinner } from '../components/Spinner'
 import { EmptyState } from '../components/EmptyState'
@@ -162,6 +163,8 @@ export default function SettingsPage() {
             </div>
           </dl>
         </section>
+
+        <SecurityCard />
 
         <PhoneAppPanel />
 

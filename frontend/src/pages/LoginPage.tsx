@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { errorMessage, isNetworkError, wakeServer } from '../lib/api'
+import axios from 'axios'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
 import { AuthShell } from './AuthShell'
@@ -13,6 +14,8 @@ export default function LoginPage() {
   const location = useLocation() as { state?: { from?: string } }
   const [email, setEmail] = useState('demo@flaire.sa')
   const [password, setPassword] = useState('')
+  const [code, setCode] = useState('')
+  const [needsCode, setNeedsCode] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [waking, setWaking] = useState<number | null>(null)
@@ -30,20 +33,27 @@ export default function LoginPage() {
     e.preventDefault()
     setBusy(true)
     setError(null)
+    const otp = needsCode ? code.trim() : undefined
     try {
       try {
-        await login(email.trim(), password)
+        await login(email.trim(), password, otp)
       } catch (err) {
         if (!isNetworkError(err)) throw err
         // Server was asleep: wake it, then try once more.
         const ok = await wakeServer((sec) => setWaking(sec))
         setWaking(null)
         if (!ok) throw err
-        await login(email.trim(), password)
+        await login(email.trim(), password, otp)
       }
       navigate(location.state?.from || '/', { replace: true })
     } catch (err) {
-      setError(isNetworkError(err) ? 'The server is not responding. It may be waking up; try again in a minute.' : errorMessage(err))
+      const detail = axios.isAxiosError(err) ? (err.response?.data as { detail?: unknown } | undefined)?.detail : undefined
+      if (detail === '2fa_required') {
+        // Password was right; the account has 2FA on. Ask for the code and resubmit.
+        setNeedsCode(true)
+      } else {
+        setError(isNetworkError(err) ? 'The server is not responding. It may be waking up; try again in a minute.' : errorMessage(err))
+      }
     } finally {
       setBusy(false)
     }
@@ -75,7 +85,31 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+          <div className="mt-1.5 text-right">
+            <Link to="/forgot" className="text-xs text-brand font-semibold hover:underline">
+              Forgot password?
+            </Link>
+          </div>
         </div>
+        {needsCode && (
+          <div>
+            <label className="label" htmlFor="code">Authentication code</label>
+            <input
+              id="code"
+              className="input tnum tracking-widest"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              placeholder="123456"
+              required
+              autoFocus
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+            />
+            <p className="text-xs text-neutral-500 mt-1">Open your authenticator app</p>
+          </div>
+        )}
         {waking !== null && (
           <div className="flex items-center gap-2 rounded-input border border-line bg-lavender px-3 py-2 text-xs text-neutral-600">
             <Spinner /> Waking up the server ({waking}s). Free hosting sleeps when idle; this takes up to a minute.
@@ -83,7 +117,7 @@ export default function LoginPage() {
         )}
         <ErrorNote message={error} />
         <button type="submit" className="btn-primary w-full" disabled={busy}>
-          {busy && <Spinner />} Sign in
+          {busy && <Spinner />} {needsCode ? 'Verify and sign in' : 'Sign in'}
         </button>
       </form>
 

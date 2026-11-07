@@ -6,6 +6,8 @@ export interface User {
   id: number
   email: string
   full_name: string
+  role?: string
+  totp_enabled: boolean
   company_id?: number
   created_at?: string
 }
@@ -25,6 +27,8 @@ export interface Company {
   notify_threshold: number
   /** True when a Lithic sandbox API key is stored for this company. The key itself is never returned. */
   lithic_configured: boolean
+  /** When true, owners and finance users without 2FA cannot approve or reject until they enable it. */
+  require_2fa_for_approvers: boolean
   created_at: string
 }
 
