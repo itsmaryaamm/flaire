@@ -97,10 +97,22 @@ export interface Department {
   spent_this_period: number
   remaining: number
   period_start: string
+  /** When true, every request from this department is held until a human lifts the pause. */
+  spending_paused?: boolean
   agent_count: number
 }
 
 export type AgentStatus = 'active' | 'paused'
+
+/** The card that belongs to one employee. Issued automatically when the employee is created. */
+export interface AgentCard {
+  id: number
+  provider: CardProvider | string
+  last4: string
+  status: CardStatus | string
+  available_balance: number
+  credit_limit: number
+}
 
 export interface Agent {
   id: number
@@ -120,6 +132,7 @@ export interface Agent {
   key_prefix: string
   key_expires_at?: string | null
   last_active_at: string | null
+  card: AgentCard | null
   created_at: string
 }
 
@@ -199,6 +212,10 @@ export interface Transaction {
   merchant: string
   status: TransactionStatus
   decline_reason: string | null
+  /** Flaire's fee on this transaction, in halalas. */
+  fee: number
+  fee_rate_bps: number
+  agent_name: string | null
   created_at: string
 }
 
@@ -250,13 +267,12 @@ export interface DashboardSummary {
   spend_by_day: SpendByDay[]
 }
 
-export type TranscriptRole = 'user' | 'assistant' | 'tool_use' | 'tool_result' | 'tool' | 'system'
+export type TranscriptRole = 'user' | 'assistant' | 'tool' | 'system'
 
-// The transcript entry shape is loosely typed on purpose: the backend returns
-// {role, content} where content can be a string or structured tool data.
+/** One entry of an employee thread or assistant transcript. Tool entries carry name/input/output. */
 export interface TranscriptEntry {
   role: TranscriptRole | string
-  content: unknown
+  content?: unknown
   name?: string
   tool_name?: string
   input?: unknown
@@ -266,14 +282,70 @@ export interface TranscriptEntry {
 
 export type RunMode = 'claude' | 'scripted'
 
-export interface AgentRun {
-  run_id?: number
-  id?: number
-  mode: RunMode
-  task?: string
+/** POST /agents/{id}/chat and GET /agents/{id}/runs: one conversation thread with an employee. */
+export interface RunOut {
+  run_id: number
+  agent_id: number
+  task: string
+  mode: RunMode | string
   transcript: TranscriptEntry[]
   purchase_requests: PurchaseRequest[]
-  created_at?: string
+  created_at: string
+}
+
+/** Kept as an alias for older imports. */
+export type AgentRun = RunOut
+
+export interface AssistantDecisionAction {
+  type: 'decision'
+  request_id: number
+  action: 'approve' | 'reject'
+  note?: string | null
+  merchant: string
+  amount: number
+  agent: string
+}
+
+export type AssistantAction = AssistantDecisionAction | { type: string; [key: string]: unknown }
+
+/** POST /assistant/chat */
+export interface AssistantResponse {
+  reply: string
+  actions: AssistantAction[]
+  transcript: TranscriptEntry[]
+  mode: RunMode | string
+}
+
+export interface ChatTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+/** GET /fees/statement?month=YYYY-MM */
+export interface FeeStatement {
+  month: string
+  fee_rate_bps: number
+  transactions: number
+  volume: number
+  fees: number
+  lines: { id: number; created_at: string; merchant: string; amount: number; fee: number }[]
+}
+
+/** GET /settings/lithic/status */
+export interface LithicStatus {
+  configured: boolean
+  asa_enrolled: boolean
+  asa_signed: boolean
+  fee_rate_bps: number
+  environment: string
+}
+
+/** GET /reconciliation */
+export interface Reconciliation {
+  ok: boolean
+  requests: number
+  transactions: number
+  issues: { request_id: number | null; type: string; detail: string }[]
 }
 
 export interface AuditEntry {

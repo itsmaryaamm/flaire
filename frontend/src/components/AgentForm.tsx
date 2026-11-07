@@ -44,7 +44,7 @@ function splitList(s: string): string[] {
 }
 
 /**
- * Create / edit form for an AI employee. When `agent` is provided it edits (PATCH),
+ * Create / edit form for an employee. When `agent` is provided it edits (PATCH),
  * otherwise it creates (POST) and passes the one-time api_key back via onCreated.
  */
 export function AgentForm({
@@ -84,7 +84,7 @@ export function AgentForm({
       return
     }
     if (!form.department_id) {
-      setError('Pick a department. Create one under Departments if none exist.')
+      setError('Pick a department. Create one under Settings, Advanced, if none exist.')
       return
     }
     const payload: AgentCreateInput = {
@@ -129,8 +129,8 @@ export function AgentForm({
   return (
     <form onSubmit={submit} className="space-y-4">
       {!limitsOnly && (
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div className="sm:col-span-2">
+        <div className="grid sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-3">
             <label className="label">Name</label>
             <input className="input" required value={form.name} onChange={set('name')} placeholder="Marketing AI" />
           </div>
@@ -146,7 +146,7 @@ export function AgentForm({
           </div>
           <div>
             <label className="label">Department</label>
-            <select className="input" value={form.department_id} onChange={set('department_id')} required>
+            <select className="input text-xs" value={form.department_id} onChange={set('department_id')} required>
               {departments.length === 0 && <option value="">No departments yet</option>}
               {departments.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -162,7 +162,7 @@ export function AgentForm({
         <legend className="px-1 mono-label">Spending limits (SAR)</legend>
         <div className="grid sm:grid-cols-3 gap-3">
           <div>
-            <label className="label">Per transaction</label>
+            <label className="label">Per purchase</label>
             <input className="input tnum" inputMode="decimal" required value={form.per_transaction_limit} onChange={set('per_transaction_limit')} />
           </div>
           <div>
@@ -170,12 +170,12 @@ export function AgentForm({
             <input className="input tnum" inputMode="decimal" required value={form.monthly_limit} onChange={set('monthly_limit')} />
           </div>
           <div>
-            <label className="label">Approval above</label>
+            <label className="label">Human approval from</label>
             <input className="input tnum" inputMode="decimal" required value={form.approval_threshold} onChange={set('approval_threshold')} />
           </div>
         </div>
         <p className="text-xs text-neutral-500">
-          Anything above the approval threshold waits for a human. Anything above the per-transaction limit is denied outright.
+          Anything above the approval threshold waits for a human. Anything above the per-purchase limit is blocked outright. Limits are mirrored to the employee's card.
         </p>
       </fieldset>
 
@@ -209,7 +209,7 @@ export function AgentForm({
         </button>
         <button type="submit" className="btn-primary" disabled={busy}>
           {busy && <Spinner />}
-          {agent ? 'Save changes' : 'Create AI employee'}
+          {agent ? 'Save changes' : 'Create employee'}
         </button>
       </div>
     </form>

@@ -178,7 +178,7 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
   )
 }
 
-export function Transcript({ entries }: { entries: TranscriptEntry[] }) {
+export function Transcript({ entries, assistantLabel = 'AI employee' }: { entries: TranscriptEntry[]; assistantLabel?: string }) {
   const items = normaliseTranscript(entries)
   if (items.length === 0) return <p className="text-sm text-neutral-500">Empty transcript.</p>
   return (
@@ -200,7 +200,7 @@ export function Transcript({ entries }: { entries: TranscriptEntry[] }) {
             <div key={i} className="flex justify-start">
               <div className="max-w-[85%] rounded-card rounded-bl-md bg-white border border-line px-4 py-2.5 text-sm whitespace-pre-wrap">
                 <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-neutral-500 mb-1">
-                  <Bot className="h-3 w-3" /> AI employee
+                  <Bot className="h-3 w-3" /> {assistantLabel}
                 </div>
                 {it.text}
               </div>

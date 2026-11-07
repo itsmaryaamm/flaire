@@ -8,11 +8,11 @@ import type { OnboardingStatus } from '../../types'
 
 const ROWS: { key: keyof OnboardingStatus['steps']; label: string; to: string }[] = [
   { key: 'company', label: 'Company', to: '/welcome' },
-  { key: 'department', label: 'Budget', to: '/budgets' },
-  { key: 'card', label: 'Card', to: '/cards' },
-  { key: 'agent', label: 'AI employee', to: '/agents' },
+  { key: 'department', label: 'Budget', to: '/settings#advanced' },
+  { key: 'card', label: 'Card', to: '/employees' },
+  { key: 'agent', label: 'Employee', to: '/employees' },
   { key: 'claude_connected', label: 'Claude connected', to: '/settings#connect' },
-  { key: 'first_request', label: 'First request', to: '/agents' },
+  { key: 'first_request', label: 'First request', to: '/employees' },
   { key: 'two_factor', label: '2FA', to: '/settings#security' },
 ]
 
@@ -55,7 +55,7 @@ export function GettingStartedCard() {
               {doneCount} of {ROWS.length}
             </span>
           </div>
-          <p className="text-xs text-neutral-500 mt-0.5">A few steps and your AI employees can spend safely.</p>
+          <p className="text-xs text-neutral-500 mt-0.5">A few steps and your employees can spend safely.</p>
           <ul className="mt-3 grid sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-1.5">
             {ROWS.map((r) => {
               const done = data.steps[r.key]

@@ -1,216 +1,161 @@
-import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import {
-  LayoutDashboard,
-  Bot,
-  PieChart,
-  CheckSquare,
-  ArrowLeftRight,
-  CreditCard,
-  Settings,
-  LogOut,
-  Menu,
-  X,
-  Smartphone,
-  LifeBuoy,
-} from 'lucide-react'
-import { useState } from 'react'
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Home, Users, Activity, Settings, LogOut, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { api } from '../lib/api'
 import { useFetch } from '../lib/useFetch'
-import type { DashboardSummary } from '../types'
+import type { PurchaseRequest } from '../types'
 import { KillSwitchBanner } from './KillSwitchBanner'
-import { setPreferFullDashboard } from '../lib/prefs'
+import { useKillSwitch } from './KillSwitchPanel'
 
-type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; end?: boolean; onClick?: () => void }
+type NavItem = { to: string; label: string; icon: typeof Home; end?: boolean }
 
-const nav: NavItem[] = [
-  { to: '/', label: 'Overview', icon: LayoutDashboard, end: true },
-  { to: '/agents', label: 'AI employees', icon: Bot },
-  { to: '/budgets', label: 'Departments', icon: PieChart },
-  { to: '/approvals', label: 'Approvals', icon: CheckSquare },
-  { to: '/transactions', label: 'Activity', icon: ArrowLeftRight },
-  { to: '/cards', label: 'Cards', icon: CreditCard },
+const NAV: NavItem[] = [
+  { to: '/', label: 'Home', icon: Home, end: true },
+  { to: '/employees', label: 'Employees', icon: Users },
+  { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/settings', label: 'Settings', icon: Settings },
-  // Phone view: the simple approvals screen. Clears the "prefer full dashboard" choice so "/" routes to it again on a phone.
-  { to: '/m', label: 'Phone view', icon: Smartphone, onClick: () => setPreferFullDashboard(false) },
 ]
 
-// The mobile bottom bar shows the 5 most used destinations; the rest live in the sheet menu.
-const mobilePrimary = ['/', '/agents', '/approvals', '/transactions', '/cards']
-
-function Logo({ mark = false }: { mark?: boolean }) {
-  return mark ? (
-    <img src="/flaire-mark.png" alt="Flaire" className="h-7 w-auto" />
-  ) : (
-    <img src="/flaire-logo.png" alt="Flaire" className="h-7 w-auto" />
-  )
+function initials(name: string | undefined, email: string | undefined): string {
+  const src = (name ?? '').trim() || (email ?? '').split('@')[0] || '?'
+  const parts = src.split(/[\s._-]+/).filter(Boolean)
+  const chars = parts.length >= 2 ? parts[0][0] + parts[1][0] : src.slice(0, 2)
+  return chars.toUpperCase()
 }
 
-function CountBadge({ n }: { n: number }) {
-  if (!n) return null
+/** Small kill switch state pill. Red when ON. Tapping opens the shared reason / confirm modal. */
+export function KillSwitchPill({ className = '' }: { className?: string }) {
+  const { on, openModal, modal } = useKillSwitch()
   return (
-    <span className="ml-auto inline-flex min-w-[20px] h-5 items-center justify-center rounded-pill bg-brand px-1.5 text-[11px] font-bold text-white tnum">
-      {n}
-    </span>
+    <>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        onClick={openModal}
+        className={`inline-flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-xs font-semibold transition-colors ${
+          on ? 'bg-danger border-danger text-white hover:bg-[#C8262E]' : 'bg-white border-line-strong text-neutral-600 hover:bg-lavender'
+        } ${className}`}
+        title={on ? 'Kill switch is ON. Tap to lift it.' : 'Kill switch is off. Tap to freeze all spending.'}
+      >
+        {on ? <ShieldAlert className="h-3.5 w-3.5" /> : <ShieldCheck className="h-3.5 w-3.5 text-success" />}
+        {on ? 'Kill switch ON' : 'Kill switch off'}
+      </button>
+      {modal}
+    </>
   )
 }
 
-function ConnectedAgents({ count }: { count: number }) {
-  return (
-    <div>
-      <div className="rounded-input border border-line bg-white px-3.5 py-3">
-        <div className="mono-label mb-2">Connected agents</div>
-        <div className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <span className="h-2 w-2 rounded-full bg-success shrink-0" />
-          {count} active AI employee{count === 1 ? '' : 's'}
-        </div>
-      </div>
-      <div className="mt-3 font-mono text-[11px] leading-snug text-neutral-500">Simulation · no real money moves</div>
-    </div>
-  )
-}
-
+/**
+ * One responsive shell. Desktop (md and up): slim left sidebar. Phones: bottom tab bar.
+ * The same four destinations everywhere.
+ */
 export function Layout() {
   const { user, company, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [menuOpen, setMenuOpen] = useState(false)
-  const summary = useFetch(() => api.get<DashboardSummary>('/dashboard/summary').then((r) => r.data), [location.pathname])
-  const pendingCount = summary.data?.totals.pending_count ?? 0
-  const agentCount = summary.data?.agents?.filter((a) => a.status === 'active').length ?? summary.data?.totals.agent_count ?? 0
+  const pending = useFetch(() => api.get<PurchaseRequest[]>('/approvals').then((r) => r.data), [location.pathname])
+  const pendingCount = pending.data?.length ?? 0
 
   const doLogout = async () => {
     await logout()
     navigate('/login')
   }
 
-  const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `flex items-center gap-3 rounded-input px-3 py-2.5 text-sm font-semibold transition-colors ${
-      isActive ? 'bg-brand-light text-brand' : 'text-neutral-600 hover:bg-lavender hover:text-ink'
-    }`
-
-  const badgeFor = (to: string) => (to === '/approvals' ? <CountBadge n={pendingCount} /> : null)
+  const badge = (to: string) =>
+    to === '/' && pendingCount > 0 ? (
+      <span className="ml-auto inline-flex min-w-[20px] h-5 items-center justify-center rounded-pill bg-brand px-1.5 text-[11px] font-bold text-white tnum">
+        {pendingCount}
+      </span>
+    ) : null
 
   return (
     <div className="min-h-screen flex flex-col">
       <KillSwitchBanner />
       <div className="flex flex-1">
         {/* Desktop sidebar */}
-        <aside className="hidden md:flex md:flex-col w-[220px] shrink-0 border-r border-line bg-white sticky top-0 h-screen">
+        <aside className="hidden md:flex md:flex-col w-[200px] shrink-0 border-r border-line bg-white sticky top-0 h-screen">
           <div className="px-5 pt-6 pb-5">
-            <Logo />
+            <img src="/flaire-logo.png" alt="Flaire" className="h-7 w-auto" />
           </div>
           <nav className="flex-1 px-3 space-y-1">
-            {nav.map((n) => (
-              <NavLink key={n.to} to={n.to} end={n.end} className={linkClass} onClick={n.onClick}>
+            {NAV.map((n) => (
+              <NavLink
+                key={n.to}
+                to={n.to}
+                end={n.end}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 rounded-input px-3 py-2.5 text-sm font-semibold transition-colors ${
+                    isActive ? 'bg-brand-light text-brand' : 'text-neutral-600 hover:bg-lavender hover:text-ink'
+                  }`
+                }
+              >
                 <n.icon className="h-4 w-4" />
                 {n.label}
-                {badgeFor(n.to)}
+                {badge(n.to)}
               </NavLink>
             ))}
           </nav>
-          <div className="px-4 pb-5">
-            <ConnectedAgents count={agentCount} />
-            <div className="mt-4 pt-4 border-t border-line">
-              <div className="text-sm font-semibold truncate">{company?.name}</div>
-              <div className="text-xs text-neutral-500 truncate" title={user?.email}>{user?.email}</div>
-              <Link to="/welcome" className="btn-ghost mt-1.5 w-full justify-start px-2 text-xs">
-                <LifeBuoy className="h-3.5 w-3.5" /> Help: restart walkthrough
-              </Link>
-              <button onClick={doLogout} className="btn-ghost w-full justify-start px-2 text-xs">
-                <LogOut className="h-3.5 w-3.5" /> Sign out
+          <div className="px-4 pb-5 space-y-4">
+            <KillSwitchPill className="w-full justify-center" />
+            <div className="pt-4 border-t border-line flex items-center gap-2.5">
+              <span className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-full bg-brand text-white text-xs font-bold">
+                {initials(user?.full_name, user?.email)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold truncate">{user?.full_name || company?.name}</div>
+                <div className="text-[11px] text-neutral-500 truncate" title={user?.email}>
+                  {user?.email}
+                </div>
+              </div>
+              <button onClick={doLogout} className="btn-ghost p-1.5" aria-label="Sign out" title="Sign out">
+                <LogOut className="h-4 w-4" />
               </button>
             </div>
           </div>
         </aside>
 
-        {/* Mobile top bar */}
         <div className="flex-1 flex flex-col min-w-0">
-          <header className="md:hidden sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-line px-4 h-14 flex items-center justify-between">
-            <Logo />
-            <button
-              onClick={() => setMenuOpen((v) => !v)}
-              className="btn-ghost p-2"
-              aria-label="Menu"
-              aria-expanded={menuOpen}
-            >
-              {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          {/* Phone top bar */}
+          <header className="md:hidden sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-line px-4 h-14 flex items-center justify-between pt-[env(safe-area-inset-top)]">
+            <img src="/flaire-logo.png" alt="Flaire" className="h-6 w-auto" />
+            <button onClick={doLogout} className="btn-ghost p-2 text-neutral-500" aria-label="Sign out">
+              <LogOut className="h-4 w-4" />
             </button>
           </header>
-          {menuOpen && (
-            <div className="md:hidden fixed inset-0 z-40 bg-ink/30" onClick={() => setMenuOpen(false)}>
-              <div
-                className="absolute top-14 right-0 left-0 bg-white border-b border-line p-3 space-y-1 rounded-b-card"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {nav.map((n) => (
-                  <NavLink
-                    key={n.to}
-                    to={n.to}
-                    end={n.end}
-                    className={linkClass}
-                    onClick={() => {
-                      n.onClick?.()
-                      setMenuOpen(false)
-                    }}
-                  >
-                    <n.icon className="h-4 w-4" />
-                    {n.label}
-                    {badgeFor(n.to)}
-                  </NavLink>
-                ))}
-                <div className="border-t border-line pt-3 mt-2 px-3 flex items-center justify-between">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold truncate">{company?.name}</div>
-                    <div className="text-xs text-neutral-500 truncate">{user?.email}</div>
-                    <Link to="/welcome" className="text-xs text-brand font-semibold hover:underline" onClick={() => setMenuOpen(false)}>
-                      Help: restart walkthrough
-                    </Link>
-                  </div>
-                  <button onClick={doLogout} className="btn-secondary text-xs">
-                    <LogOut className="h-3.5 w-3.5" /> Sign out
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
-          <main className="flex-1 px-4 py-5 md:px-8 md:py-8 pb-24 md:pb-10 max-w-[1240px] w-full mx-auto">
+          <main className="flex-1 w-full max-w-[1100px] mx-auto px-4 py-5 md:px-8 md:py-8 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-10">
             <Outlet />
           </main>
         </div>
       </div>
 
-      {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-line grid grid-cols-5 px-1 pb-[env(safe-area-inset-bottom)]">
-        {nav
-          .filter((n) => mobilePrimary.includes(n.to))
-          .map((n) => (
-            <NavLink
-              key={n.to}
-              to={n.to}
-              end={n.end}
-              className={({ isActive }) =>
-                `relative flex flex-col items-center justify-center gap-1 py-2 text-[10px] font-semibold ${
-                  isActive ? 'text-brand' : 'text-neutral-500'
-                }`
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <span className={`inline-flex h-8 w-12 items-center justify-center rounded-pill ${isActive ? 'bg-brand-light' : ''}`}>
-                    <n.icon className="h-5 w-5" />
-                    {n.to === '/approvals' && pendingCount > 0 && (
-                      <span className="absolute top-1 right-3 h-4 min-w-[16px] rounded-pill bg-brand px-1 text-[10px] font-bold text-white flex items-center justify-center">
-                        {pendingCount}
-                      </span>
-                    )}
-                  </span>
-                  <span className="truncate max-w-[64px]">{n.label === 'AI employees' ? 'Agents' : n.label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
+      {/* Phone bottom tab bar */}
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-line grid grid-cols-4 h-16 pb-[env(safe-area-inset-bottom)]">
+        {NAV.map((n) => (
+          <NavLink
+            key={n.to}
+            to={n.to}
+            end={n.end}
+            className={({ isActive }) =>
+              `relative flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold ${isActive ? 'text-brand' : 'text-neutral-500'}`
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <span className={`inline-flex h-7 w-12 items-center justify-center rounded-pill ${isActive ? 'bg-brand-light' : ''}`}>
+                  <n.icon className="h-5 w-5" />
+                  {n.to === '/' && pendingCount > 0 && (
+                    <span className="absolute top-1.5 right-[calc(50%-22px)] h-4 min-w-[16px] rounded-pill bg-brand px-1 text-[10px] font-bold text-white flex items-center justify-center">
+                      {pendingCount}
+                    </span>
+                  )}
+                </span>
+                <span>{n.label}</span>
+              </>
+            )}
+          </NavLink>
+        ))}
       </nav>
     </div>
   )

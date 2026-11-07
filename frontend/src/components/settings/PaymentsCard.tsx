@@ -7,6 +7,7 @@ import { useToast } from '../../lib/toast'
 import type { Company } from '../../types'
 import { StatusPill } from '../StatusPill'
 import { Spinner } from '../Spinner'
+import { AsaRow } from './AsaRow'
 
 /** Settings card: the company's Lithic sandbox key (write-only, stored encrypted on the server). */
 export function PaymentsCard() {
@@ -42,7 +43,7 @@ export function PaymentsCard() {
   }
 
   return (
-    <section className="card-lg p-5">
+    <section id="payments" className="card-lg p-5 scroll-mt-20">
       <div className="flex items-center gap-2">
         <CreditCard className="h-4 w-4 text-brand" />
         <h3 className="font-bold">Payments</h3>
@@ -78,6 +79,7 @@ export function PaymentsCard() {
       <p className="text-xs text-neutral-500 mt-2">
         Get a free sandbox key at dashboard.lithic.com. Stored encrypted. Later this becomes your real card details.
       </p>
+      <AsaRow />
     </section>
   )
 }
