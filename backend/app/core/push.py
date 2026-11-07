@@ -46,10 +46,15 @@ def send_to_company_approvers(db: Session, company_id: int, title: str, body: st
         from pywebpush import WebPushException, webpush
     except ImportError:
         return {"sent": 0, "failed": 0, "subscriptions": 0, "errors": ["pywebpush not installed"]}
+    from py_vapid import Vapid
+    try:
+        vapid = Vapid.from_pem(private_pem.encode()) if "BEGIN" in private_pem else Vapid.from_string(private_pem)
+    except Exception as exc:
+        return {"sent": 0, "failed": len(subs), "subscriptions": len(subs), "errors": [f"VAPID key unusable: {exc}"]}
     for sub in subs:
         try:
             webpush(subscription_info={"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}},
-                    data=json.dumps({"title": title, "body": body, "url": url}), vapid_private_key=private_pem,
+                    data=json.dumps({"title": title, "body": body, "url": url}), vapid_private_key=vapid,
                     vapid_claims={"sub": f"mailto:{settings.smtp_from or 'flaire@example.com'}"}, ttl=3600)
             sent += 1
         except WebPushException as exc:
