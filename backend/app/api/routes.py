@@ -30,6 +30,11 @@ def company_of(user: User, db: Session) -> Company:
 
 
 def company_out(c: Company) -> CompanyOut:
+    # Rows created before a column existed can carry NULL where the model expects a list.
+    if c.trusted_merchants is None:
+        c.trusted_merchants = []
+    if c.kill_switch_frozen_cards is None:
+        c.kill_switch_frozen_cards = []
     out = CompanyOut.model_validate(c)
     out.lithic_configured = bool(c.lithic_api_key_enc) or bool(settings.lithic_api_key)
     return out

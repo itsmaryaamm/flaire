@@ -67,3 +67,7 @@ def _migrate() -> None:
                     continue
                 ddl_pg = ddl.replace("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE").replace("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE").replace("TIMESTAMP NULL", "TIMESTAMPTZ NULL")
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_pg if is_pg else ddl}"))
+        # Backfill NULL JSON lists so older rows load cleanly.
+        for table, col in (("companies", "trusted_merchants"), ("companies", "kill_switch_frozen_cards"), ("agents", "allowed_categories"), ("agents", "blocked_merchants")):
+            if table in insp.get_table_names() and col in {c["name"] for c in insp.get_columns(table)}:
+                conn.execute(text(f"UPDATE {table} SET {col} = '[]' WHERE {col} IS NULL"))

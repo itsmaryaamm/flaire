@@ -446,3 +446,12 @@ def test_password_reset_change_and_2fa(ctx):
     assert r.status_code == 403 and "two-factor" in r.json()["detail"]
     client.patch("/api/v1/company", json={"require_2fa_for_approvers": False}, headers=H)
     assert client.post("/api/v1/auth/2fa/disable", json={"password": "password123", "code": pyotp.TOTP(setup["secret"]).now()}, headers=H).json()["enabled"] is False
+
+
+def test_company_with_null_json_columns_still_loads(ctx):
+    from app.core.db import SessionLocal, engine
+    from sqlalchemy import text
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE companies SET trusted_merchants = NULL"))
+    r = client.post("/api/v1/auth/login", json={"email": "owner@test.sa", "password": "password123"})
+    assert r.status_code == 200 and r.json()["company"]["trusted_merchants"] == []
