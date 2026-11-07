@@ -6,10 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.account import router as account_router
 from app.api.asa import router as asa_router
 from app.api.auth_extra import router as auth_extra_router
+from app.api.finance import router as finance_router
 from app.api.mcp import router as mcp_router
 from app.api.oauth import router as oauth_router, well_known
 from app.api.policy import router as policy_router
 from app.api.routes import router
+from app.api.team import router as team_router
 from app.api.webhooks import router as webhooks_router
 from app.core.config import get_settings
 from app.core.db import init_db
@@ -64,7 +66,9 @@ app.add_middleware(RequestLogMiddleware)
 setup_logging()
 app.include_router(router, prefix="/api/v1")
 app.include_router(auth_extra_router, prefix="/api/v1")
+app.include_router(finance_router, prefix="/api/v1")
 app.include_router(account_router, prefix="/api/v1")
+app.include_router(team_router, prefix="/api/v1")
 app.include_router(asa_router, prefix="/api/v1")
 app.include_router(mcp_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")

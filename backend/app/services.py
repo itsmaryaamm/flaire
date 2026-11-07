@@ -23,22 +23,16 @@ from app.integrations.payments import get_adapter
 from app.integrations.shotoku import get_engine
 from app.integrations.shotoku.interface import AgentPolicy, AuthorizationRequest, Decision, DepartmentBudget
 from app.integrations.shotoku.native_engine import sar
-from app.models import Agent, Card, Company, Department, PurchaseRequest, Transaction, User, utcnow
+from app.models import Agent, ApprovalRule, Card, Company, Department, PurchaseRequest, Transaction, User, utcnow
 
 settings = get_settings()
 
 
 # ---------------- period rollover ----------------
 def ensure_period(db: Session, company: Company) -> None:
-    """Reset monthly spend counters when a new calendar month starts."""
-    first = date.today().replace(day=1)
-    for dept in db.query(Department).filter(Department.company_id == company.id).all():
-        if dept.period_start < first:
-            dept.period_start = first
-            dept.spent_this_period = 0
-            for ag in dept.agents:
-                ag.spent_this_period = 0
-    db.flush()
+    """Reset monthly spend counters when a new calendar month starts (and carry unspent budget when rollover is on)."""
+    from app.finance import roll_period
+    roll_period(db, company)
 
 
 # ---------------- authorization ----------------
@@ -85,7 +79,9 @@ def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amou
 
     engine = get_engine(company.engine or settings.auth_engine)
     decision = engine.authorize(build_authorization_request(db, company, agent, pr))
-    pr.decision = decision_to_dict(decision)
+    from app.policy import current_policy_version_id
+    pr.policy_version_id = current_policy_version_id(db, company)  # the exact rules this decision was judged against
+    pr.decision = {**decision_to_dict(decision), "policy_version": company.policy_version}
     pr.decided_at = utcnow()
     pr.status = {"approved": "approved", "denied": "denied", "pending_approval": "pending_approval"}[decision.verdict]
     audit.record(db, company.id, actor_type="system", actor_id=None, actor_name=f"engine:{decision.engine}", event=f"decision.{decision.verdict}",
@@ -93,10 +89,13 @@ def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amou
 
     if decision.approved:
         execute_payment(db, company, pr, decision)
-    elif decision.verdict == "pending_approval" and pr.amount >= (company.notify_threshold or 0):
-        from app.core.notify import notify_approval_needed
-        db.flush()
-        notify_approval_needed(db, company, pr)
+    elif decision.verdict == "pending_approval":
+        from app.core.approval_chain import attach_chain, eligible_users_for_request
+        attach_chain(db, company, pr)
+        if pr.amount >= (company.notify_threshold or 0):
+            from app.core.notify import notify_approval_needed
+            db.flush()
+            notify_approval_needed(db, company, pr, recipients=eligible_users_for_request(db, company, pr))
     db.commit()
     db.refresh(pr)
     return pr
@@ -153,9 +152,11 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
     adapter = get_adapter(card.provider, company)
     result = adapter.authorize(card, pr.amount, pr.merchant, f"FLAIRE*{pr.merchant}")
     fee = round(pr.amount * (company.fee_rate_bps or 0) / 10_000) if result.ok else 0
+    from app.finance import stamp_transaction
     tx = Transaction(company_id=company.id, purchase_request_id=pr.id, card_id=card.id, provider=card.provider, provider_ref=result.provider_ref,
                      amount=pr.amount, currency=pr.currency, merchant=pr.merchant, status=result.status, decline_reason=result.decline_reason,
-                     fee=fee, fee_rate_bps=company.fee_rate_bps or 0)
+                     fee=fee, fee_rate_bps=company.fee_rate_bps or 0, created_at=utcnow())
+    stamp_transaction(db, company, tx, agent, dept)
     db.add(tx)
     db.flush()
     pr.transaction_id = tx.id
@@ -194,14 +195,37 @@ def resolve_approval(db: Session, company: Company, user: User, pr: PurchaseRequ
             raise HTTPException(403, "Password confirmation failed. Re-enter your password to approve or reject.")
 
     ensure_period(db, company)
+    from app.core.approval_chain import pick_rule, progress_message, record_step_approval
+    from app.core.security import approval_identities
+    identities = approval_identities(db, user, pr)
+    if not identities:
+        raise HTTPException(403, "You can only act on requests for your own departments.")
+    acting_as = next((i for i in identities if i["on_behalf_of"] is None), identities[0])
+    on_behalf_of = acting_as["on_behalf_of"]
     decision_meta = dict(pr.decision or {})
     approvals: list[dict] = list(decision_meta.get("approvals", []))
 
-    # Two-person rule: first approval is recorded, money moves only after a second, different human approves.
-    if approve and pr.amount >= company.two_person_threshold:
-        if any(a["id"] == user.id for a in approvals):
+    # Approval chain (ApprovalRule): every step must be satisfied, in order, before money moves. A decline by any eligible approver rejects at once.
+    rule = db.get(ApprovalRule, pr.approval_rule_id) if pr.approval_rule_id else pick_rule(db, company, pr)
+    if rule and not (rule.active and rule.steps):
+        rule = None
+    if approve and rule:
+        pr.approval_rule_id = rule.id
+        decision_meta, state, complete = record_step_approval(db, company, user, pr, rule, note)
+        approvals = list(decision_meta.get("approvals", []))
+        if not complete:
+            pr.decision = {**decision_meta, "reasons": decision_meta.get("reasons", []) + [progress_message(state)]}
+            pr.approval_note = note
+            db.commit()
+            db.refresh(pr)
+            return pr
+        decision_meta = {**decision_meta, "reasons": decision_meta.get("reasons", []) + [progress_message(state)]}
+    # Two-person rule (no chain configured): first approval is recorded, money moves only after a second, different human approves.
+    elif approve and pr.amount >= company.two_person_threshold:
+        if any(a.get("user_id", a.get("id")) == user.id for a in approvals):
             raise HTTPException(409, "You already approved this. A different approver must give the second approval.")
-        approvals.append({"id": user.id, "full_name": user.full_name})
+        approvals.append({"user_id": user.id, "name": user.full_name, "role": acting_as["role"], "at": utcnow().isoformat(), "step": None,
+                          "on_behalf_of": {"id": on_behalf_of.id, "full_name": on_behalf_of.full_name} if on_behalf_of else None, "id": user.id, "full_name": user.full_name})
         audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="approval.first_of_two" if len(approvals) == 1 else "approval.second_of_two",
                      details={"request_id": pr.id, "note": note, "threshold": company.two_person_threshold})
         if len(approvals) < 2:
@@ -224,7 +248,9 @@ def resolve_approval(db: Session, company: Company, user: User, pr: PurchaseRequ
     pr.decided_at = utcnow()
     pr.decision = {**decision_meta, **decision_to_dict(decision), "approvals": approvals, "reasons": decision_meta.get("reasons", []) + decision.reasons}
     audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name,
-                 event="approval.approved" if approve else "approval.rejected", details={"request_id": pr.id, "note": note})
+                 event="approval.approved" if approve else "approval.rejected",
+                 details={"request_id": pr.id, "note": note, "role": acting_as["role"], "rule_id": rule.id if rule else None,
+                          "on_behalf_of": {"id": on_behalf_of.id, "full_name": on_behalf_of.full_name} if on_behalf_of else None})
 
     if decision.approved:
         pr.status = "approved"

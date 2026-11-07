@@ -1,6 +1,6 @@
 """Seed a demo company so the dashboard has something to show.
 
-    python seed.py            creates Nawah Tech with 3 departments, 3 AI employees, 2 simulated cards
+    python seed.py            creates Nawah Tech with 2 cost centers, 3 departments, 3 AI employees, 2 simulated cards
     python seed.py --reset    drops and recreates everything first
 
 Login: demo@flaire.sa / demo1234
@@ -11,7 +11,7 @@ from app.core import audit
 from app.core.db import Base, SessionLocal, engine, init_db
 from app.core.security import generate_agent_key, hash_password
 from app.integrations.payments import get_adapter
-from app.models import Agent, Card, Company, Department, User
+from app.models import Agent, ApprovalRule, Card, Company, CostCenter, Department, Membership, User
 
 DEMO_EMAIL = "demo@flaire.sa"
 DEMO_PASSWORD = "demo1234"
@@ -37,12 +37,33 @@ def seed(reset: bool = False) -> dict:
         # Second approver, needed for the two-person rule on large approvals.
         db.add(User(company_id=company.id, email="finance@flaire.sa", full_name="Khalid Al-Harbi", password_hash=hash_password(DEMO_PASSWORD), role="finance"))
 
+        cost_centers = {}
+        for code, cc_name, gl in [("MKT-100", "Marketing", "6100"), ("OPS-200", "Operations", "6200")]:
+            cc = CostCenter(company_id=company.id, code=code, name=cc_name, gl_code=gl)
+            db.add(cc)
+            db.flush()
+            cost_centers[code] = cc
+            audit.record(db, company.id, actor_type="user", actor_id=owner.id, actor_name=owner.full_name, event="cost_center.created", details={"id": cc.id, "code": code, "gl_code": gl})
+
         depts = {}
-        for name, budget in [("Marketing", 500_000), ("Procurement", 800_000), ("Operations", 300_000)]:
-            d = Department(company_id=company.id, name=name, monthly_budget=budget)
+        for name, budget, cc_code in [("Marketing", 500_000, "MKT-100"), ("Procurement", 800_000, "OPS-200"), ("Operations", 300_000, "OPS-200")]:
+            d = Department(company_id=company.id, name=name, monthly_budget=budget, cost_center_id=cost_centers[cc_code].id)
             db.add(d)
             db.flush()
             depts[name] = d
+
+        # Teams layer: a Marketing department head, a read-only auditor, and a chain for Marketing holds at or above SAR 2,000.
+        head = User(company_id=company.id, email="head@flaire.sa", full_name="Noura Al-Qahtani", password_hash=hash_password(DEMO_PASSWORD), role="dept_head",
+                    department_id=depts["Marketing"].id)
+        db.add(head)
+        db.flush()
+        db.add(Membership(user_id=head.id, department_id=depts["Marketing"].id))
+        db.add(User(company_id=company.id, email="auditor@flaire.sa", full_name="Faisal Al-Dossari", password_hash=hash_password(DEMO_PASSWORD), role="auditor"))
+        rule = ApprovalRule(company_id=company.id, department_id=depts["Marketing"].id, min_amount=200_000, steps=[{"role": "dept_head", "count": 1}, {"role": "finance", "count": 1}])
+        db.add(rule)
+        db.flush()
+        audit.record(db, company.id, actor_type="user", actor_id=owner.id, actor_name=owner.full_name, event="approval_rule.created",
+                     details={"rule_id": rule.id, "department_id": rule.department_id, "min_amount": rule.min_amount, "steps": rule.steps})
 
         keys = {}
         agent_specs = [
@@ -71,6 +92,7 @@ def seed(reset: bool = False) -> dict:
 
         db.commit()
         print(f"Seeded {company.name}. Login {DEMO_EMAIL} / {DEMO_PASSWORD}  (second approver: finance@flaire.sa / {DEMO_PASSWORD})")
+        print(f"  Marketing department head: head@flaire.sa / {DEMO_PASSWORD}   auditor: auditor@flaire.sa / {DEMO_PASSWORD}")
         print("Agent API keys (shown once, also available via Rotate key in the dashboard):")
         for n, k in keys.items():
             print(f"  {n}: {k}")

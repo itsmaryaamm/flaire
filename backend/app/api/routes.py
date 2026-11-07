@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from datetime import timedelta as _td
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -14,12 +15,14 @@ from app.api.serializers import agent_out, department_out, purchase_out, transac
 from app.core import audit, guard
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.security import create_access_token, generate_agent_key, get_current_agent, get_current_user, hash_password, require_approver, verify_password
+from app.core.security import (create_access_token, deny_read_only, generate_agent_key, get_current_agent, get_current_user, hash_password, require_approver,
+                               verify_password, visible_department_ids)
 from app.integrations.payments import MOCK_PROVIDERS, get_adapter
 from app.models import Agent, AgentRun, AuditEntry, Card, Company, Department, PurchaseRequest, Transaction, User
 from app.schemas import (AgentCreatedOut, AgentIn, AgentKeyOut, AgentOut, AgentPatch, ApprovalIn, AuditOut, AuthOut, CardIn, CardOut, CardPatch, CompanyOut,
                          CompanyPatch, DepartmentIn, DepartmentOut, DepartmentPatch, KillSwitchIn, LoginIn, PurchaseIn, PurchaseRequestOut, RegisterIn, RunIn,
                          RunOut, TopUpIn, TransactionOut, UserOut)
+from app.policy import GOVERNED_FIELDS, bump_policy, propose_or_apply
 from app.services import ensure_period, resolve_approval, set_kill_switch, submit_purchase_request
 
 settings = get_settings()
@@ -103,7 +106,7 @@ def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db
     if body.engine:
         c.engine = body.engine
         audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="engine.changed", details={"engine": body.engine})
-    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from", "notify_threshold", "require_2fa_for_approvers")}
+    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from", "notify_threshold", "require_2fa_for_approvers", "require_change_approval")}
     if sec.get("require_2fa_for_approvers") and not user.totp_enabled:
         raise HTTPException(409, "Enable 2FA on your own account first, otherwise you would lock yourself out of approvals.")
     if body.lithic_api_key is not None:
@@ -112,18 +115,25 @@ def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db
         audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="payments.lithic_key_set" if body.lithic_api_key.strip() else "payments.lithic_key_removed", details={})
     if "trusted_merchants" in sec:
         sec["trusted_merchants"] = [m.strip() for m in sec["trusted_merchants"] if m.strip()][:200]
-    for k, v in sec.items():
-        setattr(c, k, v)
-    if sec:
-        audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="security.updated", details=sec)
+    # Security settings go through change control: tightening applies now, loosening may need a second admin (app.policy).
+    diff = {k: {"from": getattr(c, k), "to": v} for k, v in sec.items() if getattr(c, k) != v}
+    applied, pending = propose_or_apply(db, c, user, "company", c, diff, body.change_reason or "")
+    if applied and diff:
+        audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="security.updated", details={k: d["to"] for k, d in diff.items()})
     db.commit()
+    if pending is not None:
+        return JSONResponse(status_code=202, content={"pending_change_id": pending.id, "message": "Needs a second admin"})
     db.refresh(c)
     return company_out(c)
 
 
 @router.post("/company/kill-switch", response_model=CompanyOut, tags=["company"])
 def kill_switch(body: KillSwitchIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
-    return company_out(set_kill_switch(db, company_of(user, db), user, body.enabled, body.reason))
+    c = set_kill_switch(db, company_of(user, db), user, body.enabled, body.reason)
+    bump_policy(db, c, user, f"Kill switch {'on' if body.enabled else 'off'} by {user.full_name}")
+    db.commit()
+    db.refresh(c)
+    return company_out(c)
 
 
 # ====================================================== departments
@@ -158,10 +168,20 @@ def _dept(db: Session, user: User, dept_id: int) -> Department:
 def patch_department(dept_id: int, body: DepartmentPatch, user: User = Depends(require_approver), db: Session = Depends(get_db)):
     d = _dept(db, user, dept_id)
     changes = body.model_dump(exclude_none=True)
+    if "cost_center_id" in changes:
+        from app.api.finance import check_cost_center
+        check_cost_center(db, user.company_id, changes["cost_center_id"])
+    reason = changes.pop("change_reason", "") or ""
+    governed = {k: changes.pop(k) for k in list(changes) if k in GOVERNED_FIELDS["department"]}
     for k, v in changes.items():
         setattr(d, k, v)
-    audit.record(db, d.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="department.updated", details={"id": d.id, **changes})
+    diff = {k: {"from": getattr(d, k), "to": v} for k, v in governed.items() if getattr(d, k) != v}
+    applied, pending = propose_or_apply(db, company_of(user, db), user, "department", d, diff, reason)
+    audit.record(db, d.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="department.updated",
+                 details={"id": d.id, **changes, **({k: v["to"] for k, v in diff.items()} if applied else {"pending_change_id": pending.id})})
     db.commit()
+    if pending is not None:
+        return JSONResponse(status_code=202, content={"pending_change_id": pending.id, "message": "Needs a second admin"})
     db.refresh(d)
     return department_out(d)
 
@@ -194,6 +214,9 @@ def create_agent(body: AgentIn, user: User = Depends(require_approver), db: Sess
     plain, h, prefix = generate_agent_key()
     fields = body.model_dump()
     days = fields.pop("key_expires_in_days", None)
+    if fields.get("cost_center_id"):
+        from app.api.finance import check_cost_center
+        check_cost_center(db, user.company_id, fields["cost_center_id"])
     a = Agent(company_id=user.company_id, api_key_hash=h, key_prefix=prefix, key_expires_at=(datetime.now(timezone.utc) + _td(days=days)) if days else None, **fields)
     db.add(a)
     db.flush()
@@ -220,14 +243,24 @@ def patch_agent(agent_id: int, body: AgentPatch, user: User = Depends(require_ap
         changes["key_expires_at"] = a.key_expires_at.isoformat() if a.key_expires_at else None
     if "department_id" in changes:
         _dept(db, user, changes["department_id"])
+    if "cost_center_id" in changes:
+        from app.api.finance import check_cost_center
+        check_cost_center(db, user.company_id, changes["cost_center_id"])
     if "status" in changes and changes["status"] not in ("active", "paused"):
         raise HTTPException(422, "status must be active or paused")
+    reason = changes.pop("change_reason", "") or ""
+    governed = {k: changes.pop(k) for k in list(changes) if k in GOVERNED_FIELDS["agent"]}
     for k, v in changes.items():
         setattr(a, k, v)
-    audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.updated", details={"id": a.id, **changes})
+    diff = {k: {"from": getattr(a, k), "to": v} for k, v in governed.items() if getattr(a, k) != v}
+    applied, pending = propose_or_apply(db, company_of(user, db), user, "agent", a, diff, reason)
+    audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.updated",
+                 details={"id": a.id, **changes, **({k: v["to"] for k, v in diff.items()} if applied else {"pending_change_id": pending.id})})
     from app.cards import sync_card_with_agent
     sync_card_with_agent(db, company_of(user, db), a)
     db.commit()
+    if pending is not None:
+        return JSONResponse(status_code=202, content={"pending_change_id": pending.id, "message": "Needs a second admin"})
     db.refresh(a)
     return agent_out(a)
 
@@ -261,6 +294,7 @@ def _run_out(db: Session, run: AgentRun) -> RunOut:
 
 @router.post("/agents/{agent_id}/run", response_model=RunOut, tags=["agents"])
 def run_agent(agent_id: int, body: RunIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    deny_read_only(user)
     a = _agent(db, user, agent_id)
     c = company_of(user, db)
     audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.task_assigned", details={"agent_id": a.id, "task": body.task[:200]})
@@ -309,6 +343,9 @@ def agent_request(pr_id: int, agent: Agent = Depends(get_current_agent), db: Ses
 @router.get("/purchase-requests", response_model=list[PurchaseRequestOut], tags=["purchases"])
 def list_purchases(status: str | None = None, agent_id: int | None = None, limit: int = Query(50, le=500), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     q = db.query(PurchaseRequest).filter(PurchaseRequest.company_id == user.company_id)
+    scope = visible_department_ids(db, user)
+    if scope is not None:
+        q = q.filter(PurchaseRequest.department_id.in_(scope))
     if status:
         q = q.filter(PurchaseRequest.status == status)
     if agent_id:
@@ -331,6 +368,9 @@ def get_purchase(pr_id: int, user: User = Depends(get_current_user), db: Session
 @router.get("/approvals", response_model=list[PurchaseRequestOut], tags=["approvals"])
 def list_approvals(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     q = db.query(PurchaseRequest).filter(PurchaseRequest.company_id == user.company_id, PurchaseRequest.status == "pending_approval")
+    scope = visible_department_ids(db, user)
+    if scope is not None:
+        q = q.filter(PurchaseRequest.department_id.in_(scope))
     return [purchase_out(p) for p in q.order_by(PurchaseRequest.id.asc()).all()]
 
 
@@ -639,8 +679,12 @@ def fee_statement(month: str | None = None, user: User = Depends(get_current_use
     rows = db.query(Transaction).filter(Transaction.company_id == c.id, Transaction.status.in_(["settled", "authorized"]), Transaction.created_at >= start, Transaction.created_at < end).all()
     volume = sum(t.amount for t in rows)
     fees = sum(t.fee or 0 for t in rows)
-    return {"month": f"{y:04d}-{m:02d}", "fee_rate_bps": c.fee_rate_bps, "transactions": len(rows), "volume": volume, "fees": fees,
-            "lines": [{"id": t.id, "created_at": t.created_at, "merchant": t.merchant, "amount": t.amount, "fee": t.fee or 0} for t in rows]}
+    vat = sum(t.vat_amount or 0 for t in rows)
+    fee_vat = round(fees * 15 / 100)
+    return {"month": f"{y:04d}-{m:02d}", "fee_rate_bps": c.fee_rate_bps, "transactions": len(rows), "volume": volume, "volume_excl_vat": volume - vat, "vat": vat,
+            "vat_rate_bps": c.vat_rate_bps, "fees": fees, "fee_vat": fee_vat, "fees_incl_vat": fees + fee_vat,
+            "lines": [{"id": t.id, "created_at": t.created_at, "merchant": t.merchant, "amount": t.amount, "vat_amount": t.vat_amount or 0,
+                       "amount_excl_vat": t.amount - (t.vat_amount or 0), "fee": t.fee or 0} for t in rows]}
 
 
 # ====================================================== conversations
@@ -653,6 +697,7 @@ class ChatIn(BaseModel):
 @router.post("/agents/{agent_id}/chat", response_model=RunOut, tags=["agents"])
 def agent_chat(agent_id: int, body: ChatIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from app.agents.chat import employee_chat
+    deny_read_only(user)
     a = _agent(db, user, agent_id)
     c = company_of(user, db)
     run = db.get(AgentRun, body.run_id) if body.run_id else None

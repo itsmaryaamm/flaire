@@ -59,7 +59,7 @@ def create_company(body: CompanyIn, user: User = Depends(get_current_user), db: 
 @router.post("/onboarding/quickstart", tags=["onboarding"])
 def quickstart(body: QuickstartIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     company = db.get(Company, user.company_id)
-    if user.role not in ("owner", "finance"):
+    if user.role not in ("owner", "admin", "finance"):
         raise HTTPException(403, "Only owners can set up the company.")
     made = {}
     dept = db.query(Department).filter(Department.company_id == company.id).first()

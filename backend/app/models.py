@@ -79,6 +79,7 @@ class Department(Base):
     period_start: Mapped[date] = mapped_column(Date, default=lambda: date.today().replace(day=1))
     spending_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # department-level kill switch
     cost_center_id: Mapped[int | None] = mapped_column(ForeignKey("cost_centers.id"), nullable=True)
+    gl_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     rollover_balance: Mapped[int] = mapped_column(Integer, default=0)  # carried from previous period when rollover is on
 
     company: Mapped[Company] = relationship(back_populates="departments")
@@ -86,7 +87,7 @@ class Department(Base):
 
     @property
     def remaining(self) -> int:
-        return max(self.monthly_budget - self.spent_this_period, 0)
+        return max(self.monthly_budget + (self.rollover_balance or 0) - self.spent_this_period, 0)
 
 
 class Agent(Base):

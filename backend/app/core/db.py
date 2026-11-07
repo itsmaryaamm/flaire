@@ -56,7 +56,7 @@ _NEW_COLUMNS = {
     "users": [("totp_secret_enc", "TEXT NULL"), ("totp_enabled", "BOOLEAN DEFAULT 0"), ("supabase_uid", "VARCHAR(64) NULL"),
               ("department_id", "INTEGER NULL"), ("locale", "VARCHAR(5) DEFAULT 'en'"), ("status", "VARCHAR(20) DEFAULT 'active'")],
     "agents": [("key_expires_at", "TIMESTAMP NULL"), ("card_id", "INTEGER NULL"), ("cost_center_id", "INTEGER NULL"), ("gl_code", "VARCHAR(40) NULL"), ("max_requests_per_day", "INTEGER DEFAULT 50")],
-    "departments": [("spending_paused", "BOOLEAN DEFAULT 0"), ("cost_center_id", "INTEGER NULL"), ("rollover_balance", "INTEGER DEFAULT 0")],
+    "departments": [("spending_paused", "BOOLEAN DEFAULT 0"), ("cost_center_id", "INTEGER NULL"), ("gl_code", "VARCHAR(40) NULL"), ("rollover_balance", "INTEGER DEFAULT 0")],
     "purchase_requests": [("policy_version_id", "INTEGER NULL"), ("approval_rule_id", "INTEGER NULL")],
 }
 

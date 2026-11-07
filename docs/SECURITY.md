@@ -55,3 +55,31 @@ Roadmap for enterprise: SSO (Google Workspace, Microsoft Entra) via OIDC, SCIM u
 - Distributed rate limiting (current limiter is per process)
 - Real SAR currency handling on the card rail (sandbox maps halalas to cents 1:1)
 - Any real money. Real Saudi payment services need a licensed partner and SAMA compliance.
+
+## Policy versioning and change approval (four-eyes on the rules)
+
+Every purchase decision is judged against a numbered, hashed snapshot of the company's spending policy: security
+settings (two-person threshold, password on approve, trusted suppliers, new-supplier review amount, notification
+threshold, 2FA for approvers, fee rate, kill switch), every department's budget and pause state, every AI employee's
+limits, categories, blocked merchants and rate limits, and every active approval rule. The request stores
+`policy_version_id` and the decision carries `policy_version`, so an auditor can answer "which rules allowed this"
+months later. A change that leaves the policy identical does not create a new version (same sha256, same version).
+
+Endpoints: `GET /policy/versions`, `GET /policy/versions/{id}` (snapshot), `GET /policy/diff?from=&to=` (field-level
+diff), `GET /policy/changes?status=`, `POST /policy/changes/{id}/approve|reject|cancel`.
+
+With **Settings → Security → Require a second admin for policy changes** (`require_change_approval`) on, a change to
+limits or rules is split by direction:
+
+| Direction | Examples | What happens |
+|---|---|---|
+| Tightening (reduces risk) | lowering a per-transaction, monthly or department limit; pausing an AI employee or department; adding a blocked merchant; narrowing allowed categories; removing a trusted supplier; lowering the two-person or notification threshold; lowering the new-supplier review amount; turning a security check on; lowering an approval rule's minimum amount or adding steps to it | applies immediately, new policy version, audit `policy.change_applied` |
+| Loosening (lets more money move) | raising any limit, budget or rate limit; resuming a paused employee or department; removing a blocked merchant; widening allowed categories; adding a trusted supplier; raising the two-person, notification or new-supplier review amount; turning a security check off; raising an approval rule's minimum amount, reducing its steps or deactivating it; turning change approval itself off | `202 {"pending_change_id", "message": "Needs a second admin"}`; nothing applied until a different owner or admin approves it (password re-entry when the company requires it); then applied, new policy version, audit `policy.change_approved` |
+
+The rule in one line: an attacker who has one admin account can only make the company safer; anything that opens the
+tap needs a second pair of eyes. Turning change approval off is treated as loosening while it is on, otherwise the
+control would be a one-line bypass. Turning it on applies immediately. The proposer cannot approve their own change,
+pending changes are re-checked against current values at approval time (stale proposals are refused), and every
+proposal, approval, rejection and cancellation lands in the hash-chained audit ledger. The kill switch and every
+directly applied change also bump the policy version with a human summary such as
+`Marketing AI monthly limit 400,000 -> 600,000 by Sara`.

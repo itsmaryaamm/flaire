@@ -52,6 +52,8 @@ class CompanyOut(BaseModel):
     notify_threshold: int = 0
     lithic_configured: bool = False
     require_2fa_for_approvers: bool = False
+    require_change_approval: bool = False
+    policy_version: int = 0
     created_at: UtcDatetime
     model_config = {"from_attributes": True}
 
@@ -73,6 +75,8 @@ class CompanyPatch(BaseModel):
     notify_threshold: int | None = Field(default=None, ge=0)
     lithic_api_key: str | None = None   # write-only; empty string removes
     require_2fa_for_approvers: bool | None = None
+    require_change_approval: bool | None = None  # turning it off while on needs a second admin
+    change_reason: str | None = Field(default=None, max_length=500)
 
     @field_validator("engine")
     @classmethod
@@ -97,6 +101,9 @@ class DepartmentPatch(BaseModel):
     name: str | None = None
     monthly_budget: int | None = Field(default=None, ge=0)
     spending_paused: bool | None = None
+    cost_center_id: int | None = None
+    gl_code: str | None = Field(default=None, max_length=40)
+    change_reason: str | None = Field(default=None, max_length=500)
 
 
 class DepartmentOut(BaseModel):
@@ -108,6 +115,9 @@ class DepartmentOut(BaseModel):
     period_start: date
     spending_paused: bool = False
     agent_count: int = 0
+    cost_center_id: int | None = None
+    gl_code: str | None = None
+    rollover_balance: int = 0
 
 
 # ---------- agents ----------
@@ -122,6 +132,8 @@ class AgentIn(BaseModel):
     blocked_merchants: list[str] = []
     max_requests_per_hour: int = Field(default=10, ge=1, le=1000)
     key_expires_in_days: int | None = Field(default=None, ge=1, le=365)
+    cost_center_id: int | None = None
+    gl_code: str | None = Field(default=None, max_length=40)
 
 
 class AgentPatch(BaseModel):
@@ -135,7 +147,11 @@ class AgentPatch(BaseModel):
     allowed_categories: list[str] | None = None
     blocked_merchants: list[str] | None = None
     max_requests_per_hour: int | None = Field(default=None, ge=1, le=1000)
+    max_requests_per_day: int | None = Field(default=None, ge=1, le=10_000)
     key_expires_in_days: int | None = Field(default=None, ge=0, le=365)  # 0 clears expiry
+    change_reason: str | None = Field(default=None, max_length=500)
+    cost_center_id: int | None = None
+    gl_code: str | None = Field(default=None, max_length=40)
 
 
 class AgentOut(BaseModel):
@@ -152,10 +168,13 @@ class AgentOut(BaseModel):
     allowed_categories: list[str]
     blocked_merchants: list[str]
     max_requests_per_hour: int
+    max_requests_per_day: int = 50
     key_prefix: str
     last_active_at: UtcDatetime | None
     key_expires_at: UtcDatetime | None = None
     card: dict | None = None   # {id, provider, last4, status, available_balance, credit_limit}
+    cost_center_id: int | None = None
+    gl_code: str | None = None
     created_at: UtcDatetime
 
 
@@ -194,6 +213,10 @@ class PurchaseIn(BaseModel):
 class ApprovedBy(BaseModel):
     id: int
     full_name: str
+    role: str | None = None            # role the approval counted as (chain steps)
+    step: int | None = None            # 1-based chain step, None for the plain two-person rule
+    at: str | None = None
+    on_behalf_of: dict | None = None   # {"id", "full_name"} when a delegate acted for someone
 
 
 class PurchaseRequestOut(BaseModel):
@@ -237,6 +260,12 @@ class TransactionOut(BaseModel):
     decline_reason: str | None
     fee: int = 0
     fee_rate_bps: int = 0
+    vat_amount: int = 0
+    vat_rate_bps: int = 0
+    cost_center_id: int | None = None
+    gl_code: str | None = None
+    period: str | None = None
+    locked: bool = False
     agent_name: str | None = None
     created_at: UtcDatetime
 

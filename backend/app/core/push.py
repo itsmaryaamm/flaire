@@ -35,11 +35,13 @@ def get_keys(db: Session) -> tuple[str, str]:
     return private_pem, public_b64
 
 
-def send_to_company_approvers(db: Session, company_id: int, title: str, body: str, url: str) -> dict:
+def send_to_company_approvers(db: Session, company_id: int, title: str, body: str, url: str, user_ids: list[int] | None = None) -> dict:
+    """Pushes to approvers' devices. With user_ids, only those people (the ones who can act on the current step)."""
     settings = get_settings()
     private_pem, _ = get_keys(db)
-    subs = (db.query(PushSubscription).join(User, User.id == PushSubscription.user_id)
-            .filter(User.company_id == company_id, User.role.in_(["owner", "finance"])).all())
+    q = db.query(PushSubscription).join(User, User.id == PushSubscription.user_id).filter(User.company_id == company_id)
+    q = q.filter(User.id.in_(user_ids or [-1])) if user_ids is not None else q.filter(User.role.in_(["owner", "admin", "finance"]))
+    subs = q.all()
     sent, failed = 0, 0
     errors: list[str] = []
     try:
