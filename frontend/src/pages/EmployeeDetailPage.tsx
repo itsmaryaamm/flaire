@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react'
 import { api, errorMessage } from '../lib/api'
 import { useFetch } from '../lib/useFetch'
 import { useToast } from '../lib/toast'
+import { useT } from '../lib/i18n'
 import type { Agent, Department } from '../types'
 import { PageLoader, Spinner } from '../components/Spinner'
 import { ErrorNote } from '../components/ErrorNote'
@@ -18,6 +19,7 @@ export default function EmployeeDetailPage() {
   const [search] = useSearchParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const t = useT()
   const agentId = Number(id)
 
   const agent = useFetch(() => api.get<Agent>(`/agents/${agentId}`).then((r) => r.data), [agentId])
@@ -41,7 +43,7 @@ export default function EmployeeDetailPage() {
     setBusy(true)
     try {
       await api.delete(`/agents/${a.id}`)
-      toast.success(`${a.name} deleted.`)
+      toast.success(t('employees.deleted', { name: a.name }))
       navigate('/employees', { replace: true })
     } catch (err) {
       toast.error(errorMessage(err))
@@ -55,7 +57,7 @@ export default function EmployeeDetailPage() {
       <div className="space-y-3">
         <ErrorNote message={agent.error} />
         <Link to="/employees" className="btn-secondary">
-          <ArrowLeft className="h-4 w-4" /> Back to employees
+          <ArrowLeft className="h-4 w-4 rtl-flip" /> {t('employees.backToEmployees')}
         </Link>
       </div>
     )
@@ -66,7 +68,7 @@ export default function EmployeeDetailPage() {
   return (
     <div className="space-y-4">
       <Link to="/employees" className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-brand font-medium">
-        <ArrowLeft className="h-4 w-4" /> Employees
+        <ArrowLeft className="h-4 w-4 rtl-flip" /> {t('employees.title')}
       </Link>
 
       <div className="grid lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-5 items-start">
@@ -87,26 +89,26 @@ export default function EmployeeDetailPage() {
         </div>
       </div>
 
-      <ApiKeyReveal apiKey={revealKey} agentName={a.name} title="Key rotated" onClose={() => setRevealKey(null)} />
+      <ApiKeyReveal apiKey={revealKey} agentName={a.name} title={t('employees.keyRotated')} onClose={() => setRevealKey(null)} />
 
       <Modal
         open={deleting}
         onClose={() => setDeleting(false)}
-        title="Delete employee?"
+        title={t('employees.deleteTitle')}
         size="sm"
         footer={
           <>
             <button className="btn-secondary" onClick={() => setDeleting(false)} disabled={busy}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button className="btn-danger" onClick={remove} disabled={busy}>
-              {busy && <Spinner />} Delete
+              {busy && <Spinner />} {t('common.delete')}
             </button>
           </>
         }
       >
         <p className="text-sm text-neutral-600">
-          <strong>{a.name}</strong> loses access permanently and its card is closed. Past requests stay in the ledger.
+          <strong>{a.name}</strong> {t('employees.deleteExplain')}
         </p>
       </Modal>
     </div>

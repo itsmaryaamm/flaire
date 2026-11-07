@@ -6,11 +6,17 @@ export interface User {
   id: number
   email: string
   full_name: string
-  role?: string
+  role?: Role | string
   totp_enabled: boolean
   company_id?: number
   created_at?: string
 }
+
+export type Role = 'owner' | 'admin' | 'finance' | 'dept_head' | 'viewer' | 'auditor'
+export const ROLES: Role[] = ['owner', 'admin', 'finance', 'dept_head', 'viewer', 'auditor']
+/** Roles that see the Admin view, Team, Finance and Policy pages. */
+export const ADMIN_VIEW_ROLES: Role[] = ['owner', 'admin', 'finance', 'auditor']
+export const TEAM_ADMIN_ROLES: Role[] = ['owner', 'admin']
 
 export interface Company {
   id: number
@@ -29,9 +35,18 @@ export interface Company {
   lithic_configured: boolean
   /** When true, owners and finance users without 2FA cannot approve or reject until they enable it. */
   require_2fa_for_approvers: boolean
+  /** When true, a loosening policy change waits for a second admin (see /policy). */
+  require_change_approval?: boolean
+  policy_version?: number
   /** True once the owner finished or dismissed the welcome walkthrough. */
   onboarding_done?: boolean
   created_at: string
+}
+
+/** PATCH on company, department or agent may answer 202 with this body instead of the object. */
+export interface PendingChangeResponse {
+  pending_change_id: number
+  message: string
 }
 
 /** GET /connector-info: how to connect a Claude client to this company's Flaire MCP endpoint. */
@@ -100,6 +115,8 @@ export interface Department {
   /** When true, every request from this department is held until a human lifts the pause. */
   spending_paused?: boolean
   agent_count: number
+  cost_center_id?: number | null
+  gl_code?: string | null
 }
 
 export type AgentStatus = 'active' | 'paused'
@@ -133,6 +150,8 @@ export interface Agent {
   key_expires_at?: string | null
   last_active_at: string | null
   card: AgentCard | null
+  cost_center_id?: number | null
+  gl_code?: string | null
   created_at: string
 }
 
@@ -147,6 +166,8 @@ export interface AgentCreateInput {
   blocked_merchants: string[]
   max_requests_per_hour: number
   key_expires_in_days?: number | null
+  cost_center_id?: number | null
+  gl_code?: string | null
 }
 
 export type AgentUpdateInput = Partial<AgentCreateInput> & { status?: AgentStatus }
@@ -215,6 +236,13 @@ export interface Transaction {
   /** Flaire's fee on this transaction, in halalas. */
   fee: number
   fee_rate_bps: number
+  vat_amount?: number
+  vat_rate_bps?: number
+  cost_center_id?: number | null
+  gl_code?: string | null
+  period?: string | null
+  /** True once the month was closed; receipts cannot change. */
+  locked?: boolean
   agent_name: string | null
   created_at: string
 }
@@ -371,4 +399,248 @@ export interface Health {
 
 export interface ApiError {
   detail: string
+}
+
+// ====================================================== team layer
+
+export interface Member {
+  id: number
+  email: string
+  full_name: string
+  role: Role | string
+  status: 'active' | 'disabled' | string
+  department_id: number | null
+  department_name: string | null
+  /** Membership rows: departments this person reads or heads. */
+  departments: number[]
+  totp_enabled: boolean
+  last_seen_at: string | null
+  created_at: string
+}
+
+export interface Invite {
+  id: number
+  email: string
+  role: Role | string
+  department_id: number | null
+  department_name: string | null
+  invited_by: string | null
+  status: 'pending' | 'accepted' | 'expired' | string
+  accepted_at: string | null
+  expires_at: string
+  created_at: string
+  email_delivered?: boolean
+  /** Only on a dev backend when email was not delivered. */
+  accept_link?: string
+  token?: string
+}
+
+export interface InvitePreview {
+  company_name: string
+  role: Role | string
+  email: string
+  department_name: string | null
+  invited_by: string | null
+  expires_at: string
+  existing_account: boolean
+  auth: 'supabase' | 'builtin'
+}
+
+export interface InviteAcceptResponse {
+  access_token: string
+  user: Member
+  company: Company
+}
+
+export type StepRole = 'dept_head' | 'finance' | 'admin' | 'owner'
+export const STEP_ROLES: StepRole[] = ['dept_head', 'finance', 'admin', 'owner']
+
+export interface ApprovalStep {
+  role: StepRole | string
+  count: number
+}
+
+export interface ApprovalRule {
+  id: number
+  department_id: number | null
+  department_name: string | null
+  /** Halalas, inclusive. */
+  min_amount: number
+  steps: ApprovalStep[]
+  active: boolean
+  created_at: string
+}
+
+export interface Delegation {
+  id: number
+  user_id: number
+  user_name: string | null
+  user_role: string | null
+  delegate_id: number
+  delegate_name: string | null
+  starts_at: string
+  ends_at: string
+  note: string | null
+  active: boolean
+  created_at: string
+}
+
+export interface ChainState {
+  rule_id: number
+  steps: ApprovalStep[]
+  satisfied: number[]
+  next: { step: number; role: string; count: number; have: number; waiting_for: number; label: string } | null
+  complete: boolean
+  total_steps: number
+}
+
+export type NeedsMeRequest = PurchaseRequest & { chain: ChainState | null }
+
+/** GET /me/view */
+export interface MyView {
+  my_role: Role | string
+  my_departments: { id: number; name: string }[]
+  needs_me: NeedsMeRequest[]
+  my_recent_approvals: { id: number; ts: string; event: string; details: Record<string, unknown> }[]
+  delegations_active_for_me: Delegation[]
+}
+
+/** GET /admin/view */
+export interface AdminView {
+  pending_total: number
+  pending_amount: number
+  pending_by_department: { department_id: number; department_name: string; count: number; amount: number }[]
+  approvers: { id: number; full_name: string; role: string; status: string; open_count: number }[]
+  members: { count: number; active: number; by_role: Record<string, number> }
+  pending_invites: number
+  stuck_holds: (NeedsMeRequest & { age_hours: number })[]
+  approval_rules: number
+  active_delegations: number
+}
+
+// ====================================================== finance layer
+
+export interface CostCenter {
+  id: number
+  code: string
+  name: string
+  gl_code: string | null
+  active: boolean
+}
+
+export interface Attachment {
+  id: number
+  transaction_id: number
+  filename: string
+  content_type: string
+  size: number
+  sha256: string
+  uploaded_by_id: number
+  created_at: string
+}
+
+export interface PeriodRow {
+  period: string
+  transaction_count: number
+  volume: number
+  vat: number
+  fees: number
+  net: number
+  pending_settlement: number
+  fiscal_year: string
+  closed: boolean
+  closed_at: string | null
+  closed_by_id: number | null
+  is_current: boolean
+}
+
+/** GET /finance/periods */
+export interface PeriodsResponse {
+  fiscal_year_start_month: number
+  current_period: string
+  periods: PeriodRow[]
+  fiscal_years: { label: string; volume: number; vat: number; fees: number; transaction_count: number; periods: PeriodRow[] }[]
+}
+
+export interface StatementBucket {
+  key: string | number | null
+  label: string
+  id?: number | null
+  name?: string | null
+  gl_code?: string | null
+  amount: number
+  vat: number
+  net: number
+  fee: number
+  count: number
+}
+
+/** GET /finance/statement?period= */
+export interface Statement {
+  period: string
+  fiscal_year: string
+  currency: string
+  transaction_count: number
+  pending_settlement: number
+  volume: number
+  vat: number
+  net: number
+  vat_rate_bps: number
+  fees: number
+  fee_rate_bps: number
+  fee_vat: number
+  fees_incl_vat: number
+  by_department: StatementBucket[]
+  by_cost_center: StatementBucket[]
+  by_agent: StatementBucket[]
+  by_category: StatementBucket[]
+  hash: string
+  closed: boolean
+  closed_at: string | null
+  closed_by_id: number | null
+}
+
+export interface FeeInvoice {
+  id: number
+  period: string
+  number: string
+  subtotal: number
+  vat: number
+  total: number
+  transaction_count: number
+  qr_payload: string
+  issued_at: string
+}
+
+// ====================================================== policy
+
+export interface PolicyChange {
+  id: number
+  target_type: 'company' | 'agent' | 'department' | 'approval_rule' | string
+  target_id: number | null
+  changes: Record<string, { from: unknown; to: unknown }>
+  reason: string | null
+  status: 'pending' | 'applied' | 'rejected' | 'cancelled' | string
+  proposed_by: { id: number; full_name: string } | null
+  decided_by: { id: number; full_name: string } | null
+  decision_note: string | null
+  policy_version_id: number | null
+  created_at: string
+  decided_at: string | null
+}
+
+export interface PolicyVersion {
+  id: number
+  version: number
+  hash: string
+  change_summary: string
+  created_at: string
+  created_by: { id: number; full_name: string } | null
+  snapshot?: Record<string, unknown>
+}
+
+export interface PolicyDiff {
+  from: PolicyVersion
+  to: PolicyVersion
+  changes: { path: string; from: unknown; to: unknown }[]
 }

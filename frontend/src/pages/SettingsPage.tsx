@@ -9,9 +9,11 @@ import { SecurityCard } from '../components/settings/SecurityCard'
 import { ApprovalRulesCard, SupplierPolicyCard } from '../components/settings/PolicyCards'
 import { AdvancedCard } from '../components/settings/AdvancedCard'
 import { DangerZoneCard } from '../components/settings/DangerZoneCard'
+import { useT } from '../lib/i18n'
 
 /** Settings: one vertical list of cards. Deep links like /settings#connect scroll to that card. */
 export default function SettingsPage() {
+  const t = useT()
   const location = useLocation()
   useEffect(() => {
     const id = location.hash.replace('#', '')
@@ -22,7 +24,7 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-[760px]">
-      <PageHeader title="Settings" />
+      <PageHeader title={t('nav.settings')} />
       <div className="space-y-5">
         <CompanyCard />
         <ConnectClaudeCard />

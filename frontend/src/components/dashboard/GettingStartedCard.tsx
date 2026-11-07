@@ -5,20 +5,22 @@ import { api, errorMessage } from '../../lib/api'
 import { useFetch } from '../../lib/useFetch'
 import { useToast } from '../../lib/toast'
 import type { OnboardingStatus } from '../../types'
+import { useT } from '../../lib/i18n'
 
 const ROWS: { key: keyof OnboardingStatus['steps']; label: string; to: string }[] = [
-  { key: 'company', label: 'Company', to: '/welcome' },
-  { key: 'department', label: 'Budget', to: '/settings#advanced' },
-  { key: 'card', label: 'Card', to: '/employees' },
-  { key: 'agent', label: 'Employee', to: '/employees' },
-  { key: 'claude_connected', label: 'Claude connected', to: '/settings#connect' },
-  { key: 'first_request', label: 'First request', to: '/employees' },
-  { key: 'two_factor', label: '2FA', to: '/settings#security' },
+  { key: 'company', label: 'onboarding.company', to: '/welcome' },
+  { key: 'department', label: 'onboarding.budget', to: '/settings#advanced' },
+  { key: 'card', label: 'onboarding.card', to: '/employees' },
+  { key: 'agent', label: 'onboarding.employee', to: '/employees' },
+  { key: 'claude_connected', label: 'onboarding.claudeConnected', to: '/settings#connect' },
+  { key: 'first_request', label: 'onboarding.firstRequest', to: '/employees' },
+  { key: 'two_factor', label: 'onboarding.twoFactor', to: '/settings#security' },
 ]
 
 /** Compact checklist shown above the KPIs until setup is complete or the owner dismisses it. */
 export function GettingStartedCard() {
   const toast = useToast()
+  const t = useT()
   const { data, setData } = useFetch(() => api.get<OnboardingStatus>('/onboarding/status').then((r) => r.data), [])
   const [hidden, setHidden] = useState(false)
   const [dismissing, setDismissing] = useState(false)
@@ -50,12 +52,12 @@ export function GettingStartedCard() {
         </span>
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline justify-between gap-3">
-            <h3 className="font-bold">Getting started</h3>
+            <h3 className="font-bold">{t('onboarding.gettingStarted')}</h3>
             <span className="mono-label tnum">
-              {doneCount} of {ROWS.length}
+              {t('onboarding.nOf', { done: doneCount, total: ROWS.length })}
             </span>
           </div>
-          <p className="text-xs text-neutral-500 mt-0.5">A few steps and your employees can spend safely.</p>
+          <p className="text-xs text-neutral-500 mt-0.5">{t('onboarding.fewSteps')}</p>
           <ul className="mt-3 grid sm:grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-1.5">
             {ROWS.map((r) => {
               const done = data.steps[r.key]
@@ -71,10 +73,10 @@ export function GettingStartedCard() {
                     </span>
                   )}
                   {done ? (
-                    <span className="text-neutral-500 line-through decoration-neutral-300">{r.label}</span>
+                    <span className="text-neutral-500 line-through decoration-neutral-300">{t(r.label)}</span>
                   ) : (
                     <Link to={r.to} className="font-semibold text-ink hover:text-brand hover:underline">
-                      {r.label}
+                      {t(r.label)}
                     </Link>
                   )}
                 </li>
@@ -83,10 +85,10 @@ export function GettingStartedCard() {
           </ul>
           <div className="mt-4 flex items-center gap-2">
             <Link to="/welcome" className="btn-primary text-xs">
-              Finish setup
+              {t('onboarding.finishSetup')}
             </Link>
             <button type="button" className="btn-ghost text-xs" onClick={dismiss} disabled={dismissing}>
-              <X className="h-3.5 w-3.5" /> Dismiss
+              <X className="h-3.5 w-3.5" /> {t('common.dismiss')}
             </button>
           </div>
         </div>

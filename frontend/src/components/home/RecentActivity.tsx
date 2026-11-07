@@ -1,22 +1,24 @@
 import { Link } from 'react-router-dom'
 import { sar } from '../../lib/money'
+import { useT } from '../../lib/i18n'
 import { formatTime } from '../../lib/useFetch'
 import type { PurchaseRequest } from '../../types'
 import { StatusPill } from '../StatusPill'
 
 /** Last few requests, compact rows. */
 export function RecentActivity({ items }: { items: PurchaseRequest[] }) {
+  const t = useT()
   return (
     <section>
       <div className="flex items-center justify-between px-1 mb-2.5">
-        <h2 className="text-sm font-bold">Recent activity</h2>
+        <h2 className="text-sm font-bold">{t('home.recentActivity')}</h2>
         <Link to="/activity" className="text-xs font-semibold text-brand hover:underline">
-          See all
+          {t('common.seeAll')}
         </Link>
       </div>
       <div className="card-lg overflow-hidden">
         {items.length === 0 ? (
-          <div className="px-4 py-6 text-center text-xs text-neutral-500">No requests yet.</div>
+          <div className="px-4 py-6 text-center text-xs text-neutral-500">{t('home.noRequestsYet')}</div>
         ) : (
           <ul className="divide-y divide-line">
             {items.map((r) => (

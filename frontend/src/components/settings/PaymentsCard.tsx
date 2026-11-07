@@ -8,11 +8,13 @@ import type { Company } from '../../types'
 import { StatusPill } from '../StatusPill'
 import { Spinner } from '../Spinner'
 import { AsaRow } from './AsaRow'
+import { useT } from '../../lib/i18n'
 
 /** Settings card: the company's Lithic sandbox key (write-only, stored encrypted on the server). */
 export function PaymentsCard() {
   const { company, setCompany } = useAuth()
   const toast = useToast()
+  const t = useT()
   const [key, setKey] = useState('')
   const [busy, setBusy] = useState<'save' | 'remove' | null>(null)
   const connected = !!company?.lithic_configured
@@ -23,7 +25,7 @@ export function PaymentsCard() {
       const { data } = await api.patch<Company>('/company', { lithic_api_key })
       setCompany(data)
       setKey('')
-      toast.success(kind === 'save' ? 'Lithic key saved. New cards can now use the Lithic sandbox.' : 'Lithic key removed.')
+      toast.success(kind === 'save' ? t('settings.lithicSaved') : t('settings.lithicRemoved'))
     } catch (err) {
       toast.error(errorMessage(err))
     } finally {
@@ -38,7 +40,7 @@ export function PaymentsCard() {
   }
 
   const remove = () => {
-    if (!window.confirm('Remove the stored Lithic key? Cards on the Lithic provider will stop working until a key is added again.')) return
+    if (!window.confirm(t('settings.lithicRemoveConfirm'))) return
     void patch('', 'remove')
   }
 
@@ -46,38 +48,38 @@ export function PaymentsCard() {
     <section id="payments" className="card-lg p-5 scroll-mt-20">
       <div className="flex items-center gap-2">
         <CreditCard className="h-4 w-4 text-brand" />
-        <h3 className="font-bold">Payments</h3>
+        <h3 className="font-bold">{t('settings.payments')}</h3>
       </div>
       <div className="mt-2 flex items-center gap-2 text-sm">
-        <span className="text-neutral-600">Lithic sandbox:</span>
-        {connected ? <StatusPill tone="green" dot>Connected</StatusPill> : <StatusPill tone="neutral">Not connected</StatusPill>}
+        <span className="text-neutral-600">{t('settings.lithicSandbox')}:</span>
+        {connected ? <StatusPill tone="green" dot>{t('settings.connected')}</StatusPill> : <StatusPill tone="neutral">{t('settings.notConnected')}</StatusPill>}
       </div>
       <form onSubmit={save} className="mt-3">
-        <label className="label" htmlFor="lithic-key">Lithic sandbox API key</label>
+        <label className="label" htmlFor="lithic-key">{t('settings.lithicKey')}</label>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
             id="lithic-key"
             className="input font-mono"
             type="password"
             autoComplete="off"
-            placeholder={connected ? 'Paste a new key to replace the stored one' : 'Paste your sandbox key'}
+            placeholder={connected ? t('settings.lithicReplace') : t('settings.lithicPaste')}
             value={key}
             onChange={(e) => setKey(e.target.value)}
           />
           <div className="flex gap-2">
             <button type="submit" className="btn-primary flex-1 sm:flex-none" disabled={busy !== null || !key.trim()}>
-              {busy === 'save' && <Spinner />} Save
+              {busy === 'save' && <Spinner />} {t('common.save')}
             </button>
             {connected && (
               <button type="button" className="btn-secondary text-danger" onClick={remove} disabled={busy !== null}>
-                {busy === 'remove' ? <Spinner /> : <Trash2 className="h-4 w-4" />} Remove
+                {busy === 'remove' ? <Spinner /> : <Trash2 className="h-4 w-4" />} {t('common.remove')}
               </button>
             )}
           </div>
         </div>
       </form>
       <p className="text-xs text-neutral-500 mt-2">
-        Get a free sandbox key at dashboard.lithic.com. Stored encrypted. Later this becomes your real card details.
+        {t('settings.lithicHint')}
       </p>
       <AsaRow />
     </section>

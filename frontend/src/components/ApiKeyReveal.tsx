@@ -4,6 +4,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, KeyRound, Plug } from 'lucide
 import { CopyBox } from './CopyBox'
 import { Modal } from './Modal'
 import { API_URL } from '../lib/api'
+import { useT } from '../lib/i18n'
 
 export function mcpUrl(apiKey: string) {
   return `${API_URL.replace(/\/$/, '')}/mcp/${apiKey}`
@@ -17,13 +18,14 @@ export function ApiKeyReveal({
   apiKey,
   agentName,
   onClose,
-  title = 'Employee ready',
+  title,
 }: {
   apiKey: string | null
   agentName?: string
   onClose: () => void
   title?: string
 }) {
+  const t = useT()
   const [advanced, setAdvanced] = useState(false)
   useEffect(() => {
     if (apiKey) setAdvanced(false)
@@ -33,11 +35,11 @@ export function ApiKeyReveal({
     <Modal
       open={!!apiKey}
       onClose={onClose}
-      title={title}
+      title={title ?? t('employees.ready')}
       size="md"
       footer={
         <button className="btn-primary" onClick={onClose}>
-          Done
+          {t('common.done')}
         </button>
       }
     >
@@ -45,13 +47,12 @@ export function ApiKeyReveal({
         <div className="rounded-card border border-brand/30 bg-brand-tint px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-ink">
             <Plug className="h-4 w-4 text-brand" />
-            Connect this employee to Claude
+            {t('employees.connectToClaude')}
           </div>
           <p className="text-xs text-neutral-600 mt-1">
-            <strong>{agentName ?? 'This employee'}</strong> has its own card and limits. To let a Claude act as it, add Flaire as a connector in
-            Claude and sign in with your Flaire account. The steps are under{' '}
+            <strong>{agentName ?? t('employees.thisEmployee')}</strong> {t('employees.connectExplain')}{' '}
             <Link to="/settings#connect" className="text-brand font-semibold hover:underline" onClick={onClose}>
-              Settings, Connect your Claude
+              {t('employees.settingsConnect')}
             </Link>
             .
           </p>
@@ -64,27 +65,27 @@ export function ApiKeyReveal({
             className="w-full flex items-center gap-2 px-3.5 py-2.5 text-sm font-semibold text-neutral-600"
             aria-expanded={advanced}
           >
-            {advanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {advanced ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4 rtl-flip" />}
             <KeyRound className="h-4 w-4 text-brand" />
-            Advanced: API key
+            {t('employees.advancedApiKey')}
           </button>
           {advanced && apiKey && (
             <div className="px-3.5 pb-3.5 space-y-3 border-t border-line pt-3">
               <div>
-                <div className="label">Raw API key</div>
+                <div className="label">{t('employees.rawKey')}</div>
                 <p className="text-xs text-neutral-600 mb-2">
-                  For scripts and other agent frameworks. Pass it as <code className="font-mono text-xs bg-lavender-deep px-1 py-0.5 rounded">X-Agent-Key</code>.
+                  {t('employees.rawKeyHint')} <code className="font-mono text-xs bg-lavender-deep px-1 py-0.5 rounded">X-Agent-Key</code>.
                 </p>
                 <CopyBox value={apiKey} />
               </div>
               <div>
-                <div className="label">Direct connector link</div>
-                <p className="text-xs text-neutral-600 mb-2">Anyone with this link can act as this employee without signing in. Share with care.</p>
+                <div className="label">{t('employees.directLink')}</div>
+                <p className="text-xs text-neutral-600 mb-2">{t('employees.directLinkHint')}</p>
                 <CopyBox value={mcpUrl(apiKey)} />
               </div>
               <div className="flex items-start gap-2 rounded-input border border-amber-300 bg-warn-tint px-3 py-2 text-xs text-warn">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                <span>Shown once. Flaire stores a hash. Lost it? Rotate the key from the employee page.</span>
+                <span>{t('employees.shownOnce')}</span>
               </div>
             </div>
           )}

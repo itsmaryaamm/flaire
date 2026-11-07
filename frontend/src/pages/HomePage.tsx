@@ -2,7 +2,8 @@ import { useCallback, useEffect } from 'react'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { useFetch } from '../lib/useFetch'
-import type { DashboardSummary, FeeStatement, PurchaseRequest } from '../types'
+import { useView } from '../lib/view'
+import type { AdminView, DashboardSummary, FeeStatement, MyView, PurchaseRequest } from '../types'
 import { KillSwitchPill } from '../components/Layout'
 import { ErrorNote } from '../components/ErrorNote'
 import { GettingStartedCard } from '../components/dashboard/GettingStartedCard'
@@ -10,6 +11,8 @@ import { NeedsYou } from '../components/home/NeedsYou'
 import { MonthCard } from '../components/home/MonthCard'
 import { AssistantPanel } from '../components/home/AssistantPanel'
 import { RecentActivity } from '../components/home/RecentActivity'
+import { MyViewPanel } from '../components/home/MyViewPanel'
+import { AdminBlock } from '../components/home/AdminBlock'
 
 const REFRESH_MS = 30_000
 
@@ -18,18 +21,25 @@ function thisMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-/** Home: what needs you, this month, the assistant, and recent activity. */
+/** Home serves both views. My view: what this person can act on. Admin view: the whole company. The header toggle decides. */
 export default function HomePage() {
   const { company } = useAuth()
+  const { mode, canSwitch } = useView()
+  const admin = mode === 'admin'
+
   const summary = useFetch(() => api.get<DashboardSummary>('/dashboard/summary').then((r) => r.data), [])
-  const approvals = useFetch(() => api.get<PurchaseRequest[]>('/approvals').then((r) => r.data), [])
+  const approvals = useFetch(() => (admin ? api.get<PurchaseRequest[]>('/approvals').then((r) => r.data) : Promise.resolve([])), [admin])
   const fees = useFetch(() => api.get<FeeStatement>('/fees/statement', { params: { month: thisMonth() } }).then((r) => r.data), [])
+  const myView = useFetch(() => (admin ? Promise.resolve(null) : api.get<MyView>('/me/view').then((r) => r.data)), [admin])
+  const adminView = useFetch(() => (admin && canSwitch ? api.get<AdminView>('/admin/view').then((r) => r.data) : Promise.resolve(null)), [admin, canSwitch])
 
   const refreshAll = useCallback(() => {
     void summary.refetch()
     void approvals.refetch()
     void fees.refetch()
-  }, [summary.refetch, approvals.refetch, fees.refetch]) // eslint-disable-line react-hooks/exhaustive-deps
+    void myView.refetch()
+    void adminView.refetch()
+  }, [summary.refetch, approvals.refetch, fees.refetch, myView.refetch, adminView.refetch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Refresh every 30 s while visible, and when the tab becomes visible again.
   useEffect(() => {
@@ -62,15 +72,20 @@ export default function HomePage() {
       // Drop it from the list right away, then reload everything.
       if (!(result.needs_second_approver && result.status === 'pending_approval')) {
         approvals.setData((prev) => (prev ? prev.filter((r) => r.id !== result.id) : prev))
+        myView.setData((prev) => (prev ? { ...prev, needs_me: prev.needs_me.filter((r) => r.id !== result.id) } : prev))
       }
       refreshAll()
     },
-    [approvals.setData, refreshAll], // eslint-disable-line react-hooks/exhaustive-deps
+    [approvals.setData, myView.setData, refreshAll], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   const totals = summary.data?.totals
   const recent = (summary.data?.recent_requests ?? []).slice(0, 6)
-  const error = approvals.error && !approvals.data ? approvals.error : summary.error && !summary.data ? summary.error : null
+  const listError = admin ? approvals.error && !approvals.data : myView.error && !myView.data
+  const error = listError ? (admin ? approvals.error : myView.error) : summary.error && !summary.data ? summary.error : null
+
+  const needsItems = admin ? (approvals.data ?? []) : (myView.data?.needs_me ?? [])
+  const needsLoading = admin ? approvals.loading && !approvals.data : myView.loading && !myView.data
 
   return (
     <div className="space-y-5">
@@ -84,14 +99,17 @@ export default function HomePage() {
         <KillSwitchPill />
       </div>
 
-      <GettingStartedCard />
+      {admin && <GettingStartedCard />}
       {error && <ErrorNote message={error} />}
+      {admin && adminView.error && !adminView.data && <ErrorNote message={adminView.error} />}
 
       <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)] gap-5 items-start">
         <div className="space-y-5 min-w-0">
-          <NeedsYou items={approvals.data ?? []} loading={approvals.loading && !approvals.data} killSwitch={!!company?.kill_switch} onDecided={onDecided} />
+          <NeedsYou items={needsItems} loading={needsLoading} killSwitch={!!company?.kill_switch} onDecided={onDecided} />
+          {!admin && myView.data && <MyViewPanel view={myView.data} />}
+          {admin && adminView.data && <AdminBlock view={adminView.data} />}
           <MonthCard spent={totals?.spent_this_period ?? 0} budget={totals?.budget_total ?? 0} fees={fees.data} />
-          <RecentActivity items={recent} />
+          {admin && <RecentActivity items={recent} />}
         </div>
         <AssistantPanel onDecided={onDecided} />
       </div>

@@ -8,6 +8,7 @@ import type { Company, ConnectorInfo, OnboardingStatus } from '../types'
 import { CopyBox } from '../components/CopyBox'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
+import { useT } from '../lib/i18n'
 
 const TOTAL = 4
 
@@ -28,8 +29,9 @@ function clearPendingCompany() {
 }
 
 function Progress({ step }: { step: number }) {
+  const t = useT()
   return (
-    <div className="flex items-center gap-2" aria-label={`Step ${step} of ${TOTAL}`}>
+    <div className="flex items-center gap-2" aria-label={t('welcome.stepOf', { step, total: TOTAL })}>
       {Array.from({ length: TOTAL }, (_, i) => (
         <span
           key={i}
@@ -41,12 +43,11 @@ function Progress({ step }: { step: number }) {
 }
 
 function StepShell({ step, title, children }: { step: number; title: string; children: React.ReactNode }) {
+  const t = useT()
   return (
     <div className="card-lg p-8 sm:p-10">
       <Progress step={step} />
-      <div className="mono-label mt-6">
-        Step {step} of {TOTAL}
-      </div>
+      <div className="mono-label mt-6">{t('welcome.stepOf', { step, total: TOTAL })}</div>
       <h1 className="text-3xl font-extrabold tracking-tightest mt-2 mb-6">{title}</h1>
       {children}
     </div>
@@ -57,6 +58,7 @@ function StepShell({ step, title, children }: { step: number; title: string; chi
 
 function CompanyStep({ onDone }: { onDone: () => void }) {
   const { user, refresh } = useAuth()
+  const t = useT()
   const [companyName, setCompanyName] = useState(readPendingCompany)
   const [fullName, setFullName] = useState(user?.full_name ?? '')
   const [busy, setBusy] = useState(false)
@@ -82,20 +84,20 @@ function CompanyStep({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <StepShell step={1} title="Name your company">
-      <p className="text-neutral-600 mb-6">This is the workspace your AI employees will spend from. You can rename it later.</p>
+    <StepShell step={1} title={t('welcome.nameCompany')}>
+      <p className="text-neutral-600 mb-6">{t('welcome.nameCompanyHint')}</p>
       <form onSubmit={submit} className="space-y-5">
         <div>
-          <label className="label" htmlFor="w-company">Company name</label>
+          <label className="label" htmlFor="w-company">{t('auth.companyName')}</label>
           <input id="w-company" className="input text-base py-2.5" required autoFocus value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Nawah Tech" />
         </div>
         <div>
-          <label className="label" htmlFor="w-name">Your name</label>
+          <label className="label" htmlFor="w-name">{t('auth.yourName')}</label>
           <input id="w-name" className="input text-base py-2.5" value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Sara" autoComplete="name" />
         </div>
         <ErrorNote message={error} />
         <button type="submit" className="btn-primary w-full text-base py-3" disabled={busy || !companyName.trim()}>
-          {busy && <Spinner />} Create company
+          {busy && <Spinner />} {t('auth.createCompany')}
         </button>
       </form>
     </StepShell>
@@ -105,6 +107,7 @@ function CompanyStep({ onDone }: { onDone: () => void }) {
 /* ---------- Step 2: first budget ---------- */
 
 function BudgetStep({ onDone }: { onDone: () => void }) {
+  const t = useT()
   const [department, setDepartment] = useState('Marketing')
   const [budget, setBudget] = useState('5000')
   const [extras, setExtras] = useState(true)
@@ -131,15 +134,15 @@ function BudgetStep({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <StepShell step={2} title="Set a first budget">
-      <p className="text-neutral-600 mb-6">AI employees can only spend inside this.</p>
+    <StepShell step={2} title={t('welcome.firstBudget')}>
+      <p className="text-neutral-600 mb-6">{t('welcome.firstBudgetHint')}</p>
       <form onSubmit={submit} className="space-y-5">
         <div>
-          <label className="label" htmlFor="w-dept">Department</label>
+          <label className="label" htmlFor="w-dept">{t('team.department')}</label>
           <input id="w-dept" className="input text-base py-2.5" required value={department} onChange={(e) => setDepartment(e.target.value)} />
         </div>
         <div>
-          <label className="label" htmlFor="w-budget">Monthly budget (SAR)</label>
+          <label className="label" htmlFor="w-budget">{t('settings.monthlyBudgetSar')}</label>
           <input
             id="w-budget"
             className="input text-base py-2.5 tnum"
@@ -154,16 +157,16 @@ function BudgetStep({ onDone }: { onDone: () => void }) {
         <label className="flex items-start gap-3 rounded-card border border-line bg-lavender px-4 py-3 text-sm cursor-pointer">
           <input type="checkbox" className="mt-1 accent-brand" checked={extras} onChange={(e) => setExtras(e.target.checked)} />
           <span>
-            <span className="font-semibold">Also create a simulated SNB card (SAR 10,000) and a Marketing AI employee</span>
-            <span className="block text-xs text-neutral-500 mt-0.5">Fastest way to see a purchase request flow end to end. No real money moves.</span>
+            <span className="font-semibold">{t('welcome.alsoCreate')}</span>
+            <span className="block text-xs text-neutral-500 mt-0.5">{t('welcome.alsoCreateHint')}</span>
           </span>
         </label>
         <ErrorNote message={error} />
         <button type="submit" className="btn-primary w-full text-base py-3" disabled={busy || Number(budget) < 0}>
-          {busy && <Spinner />} Save budget
+          {busy && <Spinner />} {t('welcome.saveBudget')}
         </button>
         <button type="button" className="btn-ghost w-full text-xs" onClick={onDone} disabled={busy}>
-          Skip for now
+          {t('welcome.skipForNow')}
         </button>
       </form>
     </StepShell>
@@ -173,6 +176,7 @@ function BudgetStep({ onDone }: { onDone: () => void }) {
 /* ---------- Step 3: connect Claude ---------- */
 
 function ConnectStep({ onDone }: { onDone: () => void }) {
+  const t = useT()
   const [info, setInfo] = useState<ConnectorInfo | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -188,18 +192,18 @@ function ConnectStep({ onDone }: { onDone: () => void }) {
   }, [])
 
   return (
-    <StepShell step={3} title="Connect your Claude">
-      <p className="text-neutral-600 mb-6">Add Flaire as a connector in Claude. Each Claude signs in as one AI employee and spends only within that employee's limits.</p>
+    <StepShell step={3} title={t('settings.connectClaude')}>
+      <p className="text-neutral-600 mb-6">{t('settings.connectHint')}</p>
       {error && <ErrorNote message={error} className="mb-4" />}
       {!info && !error && (
         <div className="flex items-center gap-2 text-sm text-neutral-500 py-2 mb-4">
-          <Spinner /> Loading connector details
+          <Spinner /> {t('settings.loadingConnector')}
         </div>
       )}
       {info && (
         <div className="space-y-4 mb-6">
           <div>
-            <div className="label">Connector URL</div>
+            <div className="label">{t('settings.connectorUrl')}</div>
             <CopyBox value={info.url} />
           </div>
           <ol className="space-y-2 text-sm text-neutral-600">
@@ -213,10 +217,10 @@ function ConnectStep({ onDone }: { onDone: () => void }) {
         </div>
       )}
       <button type="button" className="btn-primary w-full text-base py-3" onClick={onDone}>
-        I've connected it
+        {t('welcome.connectedIt')}
       </button>
       <button type="button" className="btn-ghost w-full text-xs mt-2" onClick={onDone}>
-        Do this later
+        {t('welcome.doLater')}
       </button>
     </StepShell>
   )
@@ -225,16 +229,17 @@ function ConnectStep({ onDone }: { onDone: () => void }) {
 /* ---------- Step 4: ready ---------- */
 
 const CHECKS: { key: keyof OnboardingStatus['steps']; label: string }[] = [
-  { key: 'company', label: 'Company created' },
-  { key: 'department', label: 'First budget set' },
-  { key: 'card', label: 'A card to pay from' },
-  { key: 'agent', label: 'An AI employee' },
-  { key: 'claude_connected', label: 'Claude connected' },
-  { key: 'first_request', label: 'First purchase request' },
-  { key: 'two_factor', label: 'Two-factor authentication' },
+  { key: 'company', label: 'welcome.companyCreated' },
+  { key: 'department', label: 'welcome.firstBudgetSet' },
+  { key: 'card', label: 'welcome.cardToPay' },
+  { key: 'agent', label: 'welcome.anEmployee' },
+  { key: 'claude_connected', label: 'onboarding.claudeConnected' },
+  { key: 'first_request', label: 'welcome.firstRequest' },
+  { key: 'two_factor', label: 'security.twoFactor' },
 ]
 
 function ReadyStep() {
+  const t = useT()
   const navigate = useNavigate()
   const { refresh } = useAuth()
   const [status, setStatus] = useState<OnboardingStatus | null>(null)
@@ -256,12 +261,12 @@ function ReadyStep() {
   const steps = status?.steps
 
   return (
-    <StepShell step={4} title="You're ready">
-      <p className="text-neutral-600 mb-6">Here is where you stand. Anything unticked can be finished from the dashboard whenever you like.</p>
+    <StepShell step={4} title={t('welcome.ready')}>
+      <p className="text-neutral-600 mb-6">{t('welcome.readyHint')}</p>
       {error && <ErrorNote message={error} className="mb-4" />}
       {!status && !error && (
         <div className="flex items-center gap-2 text-sm text-neutral-500 py-2 mb-4">
-          <Spinner /> Checking your setup
+          <Spinner /> {t('welcome.checking')}
         </div>
       )}
       {steps && (
@@ -279,7 +284,7 @@ function ReadyStep() {
                     <Circle className="h-3 w-3" />
                   </span>
                 )}
-                <span className={done ? 'font-semibold' : 'text-neutral-600'}>{c.label}</span>
+                <span className={done ? 'font-semibold' : 'text-neutral-600'}>{t(c.label)}</span>
               </li>
             )
           })}
@@ -288,15 +293,12 @@ function ReadyStep() {
       {steps && !steps.two_factor && (
         <div className="flex items-start gap-2 rounded-card border border-line bg-lavender px-4 py-3 text-xs text-neutral-600 mb-6">
           <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0 text-brand" />
-          <span>Approvals are only as safe as your account. Turn on 2FA in Settings, under Security, when you have a minute.</span>
+          <span>{t('welcome.turnOn2fa')}</span>
         </div>
       )}
       <div className="flex flex-col sm:flex-row gap-3">
         <button type="button" className="btn-primary flex-1 text-base py-3" onClick={() => navigate('/')}>
-          Open dashboard
-        </button>
-        <button type="button" className="btn-secondary flex-1 text-base py-3" onClick={() => navigate('/m')}>
-          Open phone view
+          {t('welcome.openDashboard')}
         </button>
       </div>
     </StepShell>
@@ -306,6 +308,7 @@ function ReadyStep() {
 /* ---------- Page ---------- */
 
 export default function WelcomePage() {
+  const t = useT()
   const { company, user, logout } = useAuth()
   const navigate = useNavigate()
   // Users who already have a company (returning via "restart walkthrough") skip the company step.
@@ -332,10 +335,10 @@ export default function WelcomePage() {
       <div className="mt-8 flex items-center gap-3 text-xs text-neutral-500">
         <span className="truncate max-w-[220px]">{user?.email}</span>
         <button type="button" className="inline-flex items-center gap-1 text-brand font-semibold hover:underline" onClick={signOut}>
-          <LogOut className="h-3 w-3" /> Sign out
+          <LogOut className="h-3 w-3 rtl-flip" /> {t('auth.signOut')}
         </button>
       </div>
-      <p className="mt-4 font-mono text-[11px] text-neutral-500">Simulation · no real money moves</p>
+      <p className="mt-4 font-mono text-[11px] text-neutral-500">{t('auth.simulation')}</p>
     </div>
   )
 }

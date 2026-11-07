@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
+import { useT } from '../lib/i18n'
 
 export function Modal({
   open,
@@ -17,6 +18,7 @@ export function Modal({
   footer?: ReactNode
   size?: 'sm' | 'md' | 'lg'
 }) {
+  const t = useT()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -49,7 +51,7 @@ export function Modal({
       >
         <div className="flex items-center justify-between px-5 py-4 border-b border-line">
           <h2 className="text-base font-bold">{title}</h2>
-          <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close">
+          <button onClick={onClose} className="btn-ghost p-1.5" aria-label={t('common.close')}>
             <X className="h-4 w-4" />
           </button>
         </div>

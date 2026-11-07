@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { MailCheck } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { errorMessage } from '../lib/api'
 import { getSupabase, supabaseErrorMessage } from '../lib/supabase'
 import { useToast } from '../lib/toast'
+import { useT } from '../lib/i18n'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
 import { GoogleButton } from '../components/GoogleButton'
@@ -13,6 +14,7 @@ import { AuthShell } from './AuthShell'
 
 function CheckEmail({ email }: { email: string }) {
   const toast = useToast()
+  const t = useT()
   const [busy, setBusy] = useState(false)
 
   const resend = async () => {
@@ -22,7 +24,7 @@ function CheckEmail({ email }: { email: string }) {
     try {
       const { error } = await sb.auth.resend({ type: 'signup', email })
       if (error) throw error
-      toast.success('Confirmation email sent again.')
+      toast.success(t('auth.confirmationResent'))
     } catch (err) {
       toast.error(supabaseErrorMessage(err))
     } finally {
@@ -31,20 +33,18 @@ function CheckEmail({ email }: { email: string }) {
   }
 
   return (
-    <AuthShell title="Check your email" subtitle="One more step before your company exists.">
+    <AuthShell title={t('auth.checkEmail')} subtitle={t('auth.checkEmailSubtitle')}>
       <div className="flex items-start gap-3 rounded-card border border-line bg-success-tint px-3.5 py-3 text-sm text-success">
         <MailCheck className="h-4 w-4 mt-0.5 shrink-0" />
-        <span>
-          We sent a confirmation link to <strong>{email}</strong>. Open it to finish creating your account.
-        </span>
+        <span>{t('auth.sentConfirmation', { email })}</span>
       </div>
-      <p className="text-xs text-neutral-500 mt-4">Nothing in your inbox after a minute? Check spam, or send it again.</p>
+      <p className="text-xs text-neutral-500 mt-4">{t('auth.nothingInInbox')}</p>
       <button type="button" className="btn-secondary w-full mt-3" onClick={resend} disabled={busy}>
-        {busy && <Spinner />} Resend confirmation email
+        {busy && <Spinner />} {t('auth.resendConfirmation')}
       </button>
       <p className="text-sm text-neutral-500 mt-6">
-        Already confirmed?{' '}
-        <Link to="/login" className="text-brand font-semibold hover:underline">Sign in</Link>
+        {t('auth.alreadyConfirmed')}{' '}
+        <Link to="/login" className="text-brand font-semibold hover:underline">{t('auth.signIn')}</Link>
       </p>
     </AuthShell>
   )
@@ -52,8 +52,11 @@ function CheckEmail({ email }: { email: string }) {
 
 export default function RegisterPage() {
   const { register, provider } = useAuth()
+  const t = useT()
   const navigate = useNavigate()
-  const [form, setForm] = useState({ company_name: '', full_name: '', email: '', password: '' })
+  const location = useLocation() as { state?: { email?: string } }
+  const [params] = useSearchParams()
+  const [form, setForm] = useState({ company_name: '', full_name: '', email: params.get('email') || location.state?.email || '', password: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [confirmEmail, setConfirmEmail] = useState<string | null>(null)
@@ -83,34 +86,34 @@ export default function RegisterPage() {
   if (confirmEmail) return <CheckEmail email={confirmEmail} />
 
   return (
-    <AuthShell title="Create your company" subtitle="Takes thirty seconds. You can add AI employees right after.">
+    <AuthShell title={t('auth.createCompanyTitle')} subtitle={t('auth.createCompanySubtitle')}>
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <label className="label" htmlFor="company">Company name</label>
+          <label className="label" htmlFor="company">{t('auth.companyName')}</label>
           <input id="company" className="input" required value={form.company_name} onChange={set('company_name')} placeholder="Nawah Tech" />
         </div>
         <div>
-          <label className="label" htmlFor="name">Your name</label>
+          <label className="label" htmlFor="name">{t('auth.yourName')}</label>
           <input id="name" className="input" required value={form.full_name} onChange={set('full_name')} placeholder="Sara" autoComplete="name" />
         </div>
         <div>
-          <label className="label" htmlFor="email">Work email</label>
+          <label className="label" htmlFor="email">{t('auth.workEmail')}</label>
           <input id="email" type="email" className="input" required value={form.email} onChange={set('email')} placeholder="owner@nawah.sa" autoComplete="email" />
         </div>
         <div>
-          <label className="label" htmlFor="password">Password</label>
+          <label className="label" htmlFor="password">{t('auth.password')}</label>
           <input id="password" type="password" className="input" required minLength={8} value={form.password} onChange={set('password')} autoComplete="new-password" />
-          <p className="text-xs text-neutral-400 mt-1">At least 8 characters.</p>
+          <p className="text-xs text-neutral-400 mt-1">{t('auth.atLeast8')}</p>
         </div>
         <ErrorNote message={error} />
         <button type="submit" className="btn-primary w-full" disabled={busy}>
-          {busy && <Spinner />} Create company
+          {busy && <Spinner />} {t('auth.createCompany')}
         </button>
       </form>
       {provider === 'supabase' && <GoogleButton />}
       <p className="text-sm text-neutral-500 mt-6">
-        Already have an account?{' '}
-        <Link to="/login" className="text-brand font-semibold hover:underline">Sign in</Link>
+        {t('auth.alreadyHaveAccount')}{' '}
+        <Link to="/login" className="text-brand font-semibold hover:underline">{t('auth.signIn')}</Link>
       </p>
     </AuthShell>
   )

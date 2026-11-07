@@ -110,6 +110,29 @@ export async function wakeServer(onTick?: (seconds: number) => void, maxSeconds 
   return false
 }
 
+/** Downloads a file from an authenticated API route by fetching it as a blob and clicking a temporary link. */
+export async function downloadFile(path: string, filename: string, params?: Record<string, unknown>): Promise<void> {
+  const { data, headers } = await api.get<Blob>(path, { responseType: 'blob', params })
+  const disposition = String(headers['content-disposition'] ?? '')
+  const m = /filename="?([^";]+)"?/.exec(disposition)
+  const name = m?.[1] || filename
+  const url = URL.createObjectURL(data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000)
+}
+
+/** A policy PATCH answered 202: the change waits for a second admin. Returns the pending change id, or null. */
+export function pendingChangeId(res: { status: number; data: unknown }): number | null {
+  if (res.status !== 202) return null
+  const id = (res.data as { pending_change_id?: unknown } | null)?.pending_change_id
+  return typeof id === 'number' ? id : null
+}
+
 export function isNetworkError(err: unknown): boolean {
   return axios.isAxiosError(err) && !err.response
 }

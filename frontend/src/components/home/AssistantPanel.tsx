@@ -3,12 +3,13 @@ import type { FormEvent } from 'react'
 import { Send, Sparkles } from 'lucide-react'
 import { api, errorMessage } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
+import { useT } from '../../lib/i18n'
 import { sar } from '../../lib/money'
 import type { AssistantDecisionAction, AssistantResponse, ChatTurn, PurchaseRequest } from '../../types'
 import { Spinner } from '../Spinner'
 import { ErrorNote } from '../ErrorNote'
 
-const SUGGESTIONS = ['What needs me?', 'What did we spend this week?', 'Why was the last request held?']
+const SUGGESTION_KEYS = ['assistant.q1', 'assistant.q2', 'assistant.q3']
 
 type Bubble =
   | { id: number; kind: 'user'; text: string }
@@ -26,12 +27,13 @@ function isDecision(a: unknown): a is AssistantDecisionAction {
 /** Inline confirmation for a decision the assistant prepared. */
 function ActionCard({ bubble, onConfirmed }: { bubble: Extract<Bubble, { kind: 'action' }>; onConfirmed: (text: string, result: PurchaseRequest | null) => void }) {
   const { company } = useAuth()
+  const t = useT()
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const a = bubble.action
   const needsPassword = company?.require_password_on_approve ?? true
-  const verb = a.action === 'approve' ? 'Approve' : 'Decline'
+  const verb = a.action === 'approve' ? t('common.approve') : t('common.decline')
 
   const confirm = async (e: FormEvent) => {
     e.preventDefault()
@@ -44,12 +46,12 @@ function ActionCard({ bubble, onConfirmed }: { bubble: Extract<Bubble, { kind: '
       })
       const text =
         data.needs_second_approver && data.status === 'pending_approval'
-          ? `First approval recorded for ${data.merchant}. A second approver must confirm.`
+          ? t('assistant.firstApprovalRecorded', { merchant: data.merchant })
           : a.action === 'approve'
             ? data.status === 'completed'
-              ? `Approved and paid: ${data.merchant} ${sar(data.amount)}.`
-              : `Approved ${data.merchant}. Payment status: ${data.status}.`
-            : `Declined ${data.merchant} ${sar(data.amount)}.`
+              ? t('assistant.approvedAndPaid', { merchant: data.merchant, amount: sar(data.amount) })
+              : t('assistant.approvedStatus', { merchant: data.merchant, status: data.status })
+            : t('assistant.declined', { merchant: data.merchant, amount: sar(data.amount) })
       onConfirmed(text, data)
     } catch (err) {
       setError(errorMessage(err))
@@ -61,7 +63,7 @@ function ActionCard({ bubble, onConfirmed }: { bubble: Extract<Bubble, { kind: '
   return (
     <div className={`rounded-card border px-3.5 py-3 text-sm ${a.action === 'approve' ? 'border-success/40 bg-success-tint/40' : 'border-line-strong bg-lavender'}`}>
       <div className="font-semibold">
-        {verb} {a.merchant} {sar(a.amount)} from {a.agent}
+        {verb} {a.merchant} {sar(a.amount)} {t('assistant.fromEmployee', { name: a.agent })}
       </div>
       {bubble.done ? (
         <div className="text-xs text-neutral-500 mt-1">{bubble.done}</div>
@@ -71,12 +73,12 @@ function ActionCard({ bubble, onConfirmed }: { bubble: Extract<Bubble, { kind: '
             className="input h-10 flex-1"
             type="password"
             autoComplete="current-password"
-            placeholder={needsPassword ? 'Your password' : 'Password (optional)'}
+            placeholder={needsPassword ? t('decision.yourPassword') : t('decision.yourPasswordOptional')}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
           <button type="submit" className={`${a.action === 'approve' ? 'btn-success' : 'btn-secondary'} h-10 shrink-0`} disabled={busy || (needsPassword && !password)}>
-            {busy ? <Spinner /> : null} Confirm
+            {busy ? <Spinner /> : null} {t('common.confirm')}
           </button>
         </form>
       )}
@@ -88,9 +90,10 @@ function ActionCard({ bubble, onConfirmed }: { bubble: Extract<Bubble, { kind: '
 /** The company assistant: a chat over POST /assistant/chat with inline decision confirmation. */
 export function AssistantPanel({ onDecided }: { onDecided: (result: PurchaseRequest) => void }) {
   const { user } = useAuth()
+  const t = useT()
   const firstName = (user?.full_name ?? '').trim().split(/\s+/)[0] || ''
   const [bubbles, setBubbles] = useState<Bubble[]>(() => [
-    { id: next(), kind: 'assistant', text: `Hi${firstName ? ` ${firstName}` : ''}. I can tell you what needs you, what was spent, and why a request was held. Ask me anything.` },
+    { id: next(), kind: 'assistant', text: t('assistant.greeting', { name: firstName ? ` ${firstName}` : '' }) },
   ])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -136,9 +139,9 @@ export function AssistantPanel({ onDecided }: { onDecided: (result: PurchaseRequ
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-brand text-white">
             <Sparkles className="h-3.5 w-3.5" />
           </span>
-          <h2 className="text-sm font-bold">Assistant</h2>
+          <h2 className="text-sm font-bold">{t('home.assistant')}</h2>
         </div>
-        {mode === 'scripted' && <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-neutral-400 mt-1">basic mode</div>}
+        {mode === 'scripted' && <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-neutral-400 mt-1">{t('assistant.basicMode')}</div>}
       </div>
 
       <div ref={listRef} className="flex-1 lg:overflow-y-auto px-4 py-4 space-y-3">
@@ -146,13 +149,13 @@ export function AssistantPanel({ onDecided }: { onDecided: (result: PurchaseRequ
           if (b.kind === 'user')
             return (
               <div key={b.id} className="flex justify-end">
-                <div className="max-w-[85%] rounded-card rounded-br-md bg-brand text-white px-3.5 py-2.5 text-sm whitespace-pre-wrap">{b.text}</div>
+                <div className="max-w-[85%] rounded-card rounded-ee-md bg-brand text-white px-3.5 py-2.5 text-sm whitespace-pre-wrap">{b.text}</div>
               </div>
             )
           if (b.kind === 'assistant')
             return (
               <div key={b.id} className="flex justify-start">
-                <div className="max-w-[90%] rounded-card rounded-bl-md bg-lavender px-3.5 py-2.5 text-sm whitespace-pre-wrap">{b.text}</div>
+                <div className="max-w-[90%] rounded-card rounded-es-md bg-lavender px-3.5 py-2.5 text-sm whitespace-pre-wrap">{b.text}</div>
               </div>
             )
           if (b.kind === 'system')
@@ -166,7 +169,7 @@ export function AssistantPanel({ onDecided }: { onDecided: (result: PurchaseRequ
               key={b.id}
               bubble={b}
               onConfirmed={(text, result) => {
-                setBubbles((list) => [...list.map((x) => (x.id === b.id ? { ...x, done: 'Confirmed.' } : x)), { id: next(), kind: 'system', text }])
+                setBubbles((list) => [...list.map((x) => (x.id === b.id ? { ...x, done: t('assistant.confirmed') } : x)), { id: next(), kind: 'system', text }])
                 if (result) onDecided(result)
               }}
             />
@@ -174,14 +177,14 @@ export function AssistantPanel({ onDecided }: { onDecided: (result: PurchaseRequ
         })}
         {busy && (
           <div className="flex justify-start">
-            <div className="rounded-card rounded-bl-md bg-lavender px-3.5 py-2.5 text-sm text-neutral-500 inline-flex items-center gap-2">
-              <Spinner className="h-3.5 w-3.5" /> Thinking...
+            <div className="rounded-card rounded-es-md bg-lavender px-3.5 py-2.5 text-sm text-neutral-500 inline-flex items-center gap-2">
+              <Spinner className="h-3.5 w-3.5" /> {t('assistant.thinking')}
             </div>
           </div>
         )}
         {showChips && (
           <div className="flex flex-wrap gap-1.5 pt-1">
-            {SUGGESTIONS.map((s) => (
+            {SUGGESTION_KEYS.map((k) => t(k)).map((s) => (
               <button
                 key={s}
                 type="button"
@@ -205,13 +208,13 @@ export function AssistantPanel({ onDecided }: { onDecided: (result: PurchaseRequ
       >
         <input
           className="input h-11 flex-1"
-          placeholder="Ask about spending, holds or employees"
+          placeholder={t('assistant.placeholder')}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           disabled={busy}
         />
-        <button type="submit" className="btn-primary h-11 w-11 p-0 shrink-0" disabled={busy || !input.trim()} aria-label="Send">
-          <Send className="h-4 w-4" />
+        <button type="submit" className="btn-primary h-11 w-11 p-0 shrink-0" disabled={busy || !input.trim()} aria-label={t('assistant.send')}>
+          <Send className="h-4 w-4 rtl-flip" />
         </button>
       </form>
     </section>

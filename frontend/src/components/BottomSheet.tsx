@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
 import { X } from 'lucide-react'
+import { useT } from '../lib/i18n'
 
 /** Phone-first bottom sheet. Slides up from the bottom, full width, safe-area aware. */
 export function BottomSheet({
@@ -14,6 +15,7 @@ export function BottomSheet({
   title: string
   children: ReactNode
 }) {
+  const t = useT()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -46,7 +48,7 @@ export function BottomSheet({
         <div className="mx-auto mt-2.5 h-1.5 w-10 rounded-pill bg-line-strong" aria-hidden />
         <div className="flex items-center justify-between px-5 pt-3 pb-2">
           <h2 className="text-lg font-bold">{title}</h2>
-          <button onClick={onClose} className="btn-ghost h-11 w-11 p-0 rounded-full" aria-label="Close">
+          <button onClick={onClose} className="btn-ghost h-11 w-11 p-0 rounded-full" aria-label={t('common.close')}>
             <X className="h-5 w-5" />
           </button>
         </div>

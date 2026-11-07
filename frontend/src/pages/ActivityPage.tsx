@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Download } from 'lucide-react'
-import { api, errorMessage } from '../lib/api'
+import { api, downloadFile, errorMessage } from '../lib/api'
+import { useT } from '../lib/i18n'
 import { useFetch } from '../lib/useFetch'
 import { useToast } from '../lib/toast'
 import { sar } from '../lib/money'
@@ -14,10 +15,10 @@ import { FeesModal } from '../components/activity/FeesModal'
 
 type Chip = 'all' | 'paid' | 'waiting' | 'blocked'
 const CHIPS: { key: Chip; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'paid', label: 'Paid' },
-  { key: 'waiting', label: 'Waiting' },
-  { key: 'blocked', label: 'Blocked' },
+  { key: 'all', label: 'activity.all' },
+  { key: 'paid', label: 'activity.paid' },
+  { key: 'waiting', label: 'activity.waiting' },
+  { key: 'blocked', label: 'activity.blocked' },
 ]
 
 function matches(chip: Chip, r: PurchaseRequest): boolean {
@@ -35,6 +36,7 @@ function thisMonth(): string {
 /** One list of every purchase request, newest first. */
 export default function ActivityPage() {
   const toast = useToast()
+  const t = useT()
   const [chip, setChip] = useState<Chip>('all')
   const [agentId, setAgentId] = useState('')
   const [feesOpen, setFeesOpen] = useState(false)
@@ -71,15 +73,7 @@ export default function ActivityPage() {
   const exportCsv = async () => {
     setExporting(true)
     try {
-      const { data } = await api.get<Blob>('/export/requests.csv', { responseType: 'blob' })
-      const url = URL.createObjectURL(data)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'flaire-requests.csv'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 2000)
+      await downloadFile('/export/requests.csv', 'flaire-requests.csv')
     } catch (err) {
       toast.error(errorMessage(err))
     } finally {
@@ -90,15 +84,15 @@ export default function ActivityPage() {
   return (
     <div>
       <PageHeader
-        title="Activity"
-        subtitle="Every request, the decision it got, and the money that moved."
+        title={t('activity.title')}
+        subtitle={t('activity.subtitle')}
         actions={
           <>
             <button type="button" className="btn-secondary text-xs" onClick={() => setFeesOpen(true)} disabled={!fees.data}>
-              Fees this month: {fees.data ? sar(fees.data.fees) : '...'}
+              {t('activity.feesThisMonth', { amount: fees.data ? sar(fees.data.fees) : '...' })}
             </button>
             <button type="button" className="btn-secondary text-xs" onClick={exportCsv} disabled={exporting}>
-              {exporting ? <Spinner className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />} Export CSV
+              {exporting ? <Spinner className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />} {t('activity.exportCsv')}
             </button>
           </>
         }
@@ -113,19 +107,19 @@ export default function ActivityPage() {
               onClick={() => setChip(c.key)}
               className={`rounded-pill px-3 py-1 text-xs font-semibold transition-colors ${chip === c.key ? 'bg-brand-light text-brand' : 'text-neutral-600 hover:bg-lavender'}`}
             >
-              {c.label}
+              {t(c.label)}
             </button>
           ))}
         </div>
-        <select className="input w-auto h-9 py-0 text-xs" value={agentId} onChange={(e) => setAgentId(e.target.value)} aria-label="Filter by employee">
-          <option value="">All employees</option>
+        <select className="input w-auto h-9 py-0 text-xs" value={agentId} onChange={(e) => setAgentId(e.target.value)} aria-label={t('activity.filterByEmployee')}>
+          <option value="">{t('activity.allEmployees')}</option>
           {(agents.data ?? []).map((a) => (
             <option key={a.id} value={a.id}>
               {a.name}
             </option>
           ))}
         </select>
-        <span className="font-mono text-xs text-neutral-500 ml-auto tnum">{list.length} requests</span>
+        <span className="font-mono text-xs text-neutral-500 ms-auto tnum">{t('activity.nRequests', { n: list.length })}</span>
       </div>
 
       {reqs.loading && !reqs.data ? (
@@ -134,7 +128,7 @@ export default function ActivityPage() {
         <ErrorNote message={reqs.error} />
       ) : list.length === 0 ? (
         <div className="card-lg">
-          <EmptyState title="Nothing here yet" description="Try a different filter, or give an employee a task." />
+          <EmptyState title={t('activity.emptyTitle')} description={t('activity.emptyDesc')} />
         </div>
       ) : (
         <div className="card-lg overflow-hidden">

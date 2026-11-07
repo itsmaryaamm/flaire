@@ -11,8 +11,10 @@ import { EmptyState } from '../components/EmptyState'
 import { PageLoader } from '../components/Spinner'
 import { ErrorNote } from '../components/ErrorNote'
 import { EmployeeCard } from '../components/employees/EmployeeCard'
+import { useT } from '../lib/i18n'
 
 export default function EmployeesPage() {
+  const t = useT()
   const agents = useFetch(() => api.get<Agent[]>('/agents').then((r) => r.data), [])
   const departments = useFetch(() => api.get<Department[]>('/departments').then((r) => r.data), [])
   const [createOpen, setCreateOpen] = useState(false)
@@ -21,13 +23,13 @@ export default function EmployeesPage() {
   const list = agents.data ?? []
   const newButton = (
     <button className="btn-primary" onClick={() => setCreateOpen(true)}>
-      <Plus className="h-4 w-4" /> New employee
+      <Plus className="h-4 w-4" /> {t('employees.new')}
     </button>
   )
 
   return (
     <div>
-      <PageHeader title="Employees" subtitle="Each employee has its own card, limits and approval threshold. None of them can approve anything." actions={newButton} />
+      <PageHeader title={t('employees.title')} subtitle={t('employees.subtitle')} actions={newButton} />
 
       {agents.loading && !agents.data ? (
         <PageLoader />
@@ -35,7 +37,7 @@ export default function EmployeesPage() {
         <ErrorNote message={agents.error} />
       ) : list.length === 0 ? (
         <div className="card-lg">
-          <EmptyState icon={<Bot className="h-5 w-5" />} title="No employees yet" description="Create one. It gets a card and limits, then a Claude can act as it." action={newButton} />
+          <EmptyState icon={<Bot className="h-5 w-5" />} title={t('employees.noneYet')} description={t('employees.noneYetDesc')} action={newButton} />
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -45,7 +47,7 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="New employee" size="lg">
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={t('employees.new')} size="lg">
         <AgentForm
           departments={departments.data ?? []}
           onCancel={() => setCreateOpen(false)}

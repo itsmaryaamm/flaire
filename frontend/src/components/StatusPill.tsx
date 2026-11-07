@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { translate } from '../lib/i18n'
+import { moneyLocale } from '../lib/money'
 
 export type PillTone = 'green' | 'amber' | 'red' | 'neutral' | 'blue' | 'mint' | 'lavender'
 
@@ -60,7 +62,11 @@ const LABELS: Record<string, string> = {
 }
 
 export function labelFor(status: string | null | undefined): string {
-  if (!status) return 'Unknown'
+  const loc = moneyLocale()
+  if (!status) return translate(loc, 'status.unknown')
+  const key = `status.${status}`
+  const hit = translate(loc, key)
+  if (hit !== key) return hit
   const known = LABELS[status]
   if (known) return known
   const plain = status.replace(/_/g, ' ')

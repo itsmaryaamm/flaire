@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
+import { LanguageSwitch, useT } from '../lib/i18n'
 
 export function AuthShell({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+  const t = useT()
   return (
     <div className="min-h-screen bg-canvas flex flex-col items-center justify-center px-4 py-10">
       <img src="/flaire-logo.png" alt="Flaire" className="h-9 w-auto mb-8" />
@@ -9,7 +11,10 @@ export function AuthShell({ title, subtitle, children }: { title: string; subtit
         <p className="text-sm text-neutral-600 mt-1.5 mb-6">{subtitle}</p>
         {children}
       </div>
-      <p className="mt-6 font-mono text-[11px] text-neutral-500">Simulation · no real money moves</p>
+      <div className="mt-6 flex items-center gap-4">
+        <p className="font-mono text-[11px] text-neutral-500">{t('auth.simulation')}</p>
+        <LanguageSwitch />
+      </div>
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ProviderDisabledError, useAuth } from '../lib/auth'
 import { errorMessage } from '../lib/api'
 import { useToast } from '../lib/toast'
+import { useT } from '../lib/i18n'
 import { Spinner } from './Spinner'
 
 function GoogleMark() {
@@ -19,6 +20,7 @@ function GoogleMark() {
 export function GoogleButton() {
   const { signInWithGoogle } = useAuth()
   const toast = useToast()
+  const t = useT()
   const [busy, setBusy] = useState(false)
 
   const go = async () => {
@@ -28,7 +30,7 @@ export function GoogleButton() {
       // The browser is being redirected to Google; keep the button busy until it leaves.
     } catch (err) {
       setBusy(false)
-      if (err instanceof ProviderDisabledError) toast.toast('Google sign-in is not enabled yet')
+      if (err instanceof ProviderDisabledError) toast.toast(t('auth.googleDisabled'))
       else toast.error(errorMessage(err))
     }
   }
@@ -37,11 +39,11 @@ export function GoogleButton() {
     <div className="mt-5">
       <div className="flex items-center gap-3 text-[11px] font-mono uppercase tracking-[0.14em] text-neutral-400">
         <span className="h-px flex-1 bg-line" />
-        or
+        {t('auth.or')}
         <span className="h-px flex-1 bg-line" />
       </div>
       <button type="button" className="btn-secondary w-full mt-4" onClick={go} disabled={busy}>
-        {busy ? <Spinner /> : <GoogleMark />} Continue with Google
+        {busy ? <Spinner /> : <GoogleMark />} {t('auth.continueGoogle')}
       </button>
     </div>
   )

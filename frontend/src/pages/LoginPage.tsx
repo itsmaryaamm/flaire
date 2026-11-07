@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { errorMessage, isNetworkError, wakeServer } from '../lib/api'
+import { useT } from '../lib/i18n'
 import axios from 'axios'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
@@ -11,9 +12,12 @@ import { AuthShell } from './AuthShell'
 
 export default function LoginPage() {
   const { login, provider } = useAuth()
+  const t = useT()
   const navigate = useNavigate()
-  const location = useLocation() as { state?: { from?: string } }
-  const [email, setEmail] = useState('')
+  const location = useLocation() as { state?: { from?: string; email?: string } }
+  const [params] = useSearchParams()
+  const returnTo = params.get('returnTo') || location.state?.from || '/'
+  const [email, setEmail] = useState(params.get('email') || location.state?.email || '')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [needsCode, setNeedsCode] = useState(false)
@@ -53,15 +57,17 @@ export default function LoginPage() {
         if (!ok) throw err
         result = await login(email.trim(), password, otp)
       }
-      if (result.needs_onboarding) navigate('/welcome', { replace: true })
-      else navigate(location.state?.from || '/', { replace: true })
+      // An invite link must win over the walkthrough: accepting it is what gives the account a company.
+      if (returnTo.startsWith('/invite/')) navigate(returnTo, { replace: true })
+      else if (result.needs_onboarding) navigate('/welcome', { replace: true })
+      else navigate(returnTo, { replace: true })
     } catch (err) {
       const detail = axios.isAxiosError(err) ? (err.response?.data as { detail?: unknown } | undefined)?.detail : undefined
       if (detail === '2fa_required') {
         // Password was right; the account has 2FA on. Ask for the code and resubmit.
         setNeedsCode(true)
       } else {
-        setError(isNetworkError(err) ? 'The server is not responding. It may be waking up; try again in a minute.' : errorMessage(err))
+        setError(isNetworkError(err) ? t('auth.serverNotResponding') : errorMessage(err))
       }
     } finally {
       setBusy(false)
@@ -69,10 +75,10 @@ export default function LoginPage() {
   }
 
   return (
-    <AuthShell title="Sign in" subtitle="Manage what your AI employees are allowed to spend.">
+    <AuthShell title={t('auth.signIn')} subtitle={t('auth.signInSubtitle')}>
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <label className="label" htmlFor="email">Email</label>
+          <label className="label" htmlFor="email">{t('auth.email')}</label>
           <input
             id="email"
             type="email"
@@ -84,7 +90,7 @@ export default function LoginPage() {
           />
         </div>
         <div>
-          <label className="label" htmlFor="password">Password</label>
+          <label className="label" htmlFor="password">{t('auth.password')}</label>
           <input
             id="password"
             type="password"
@@ -94,15 +100,15 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
-          <div className="mt-1.5 text-right">
+          <div className="mt-1.5 text-end">
             <Link to="/forgot" className="text-xs text-brand font-semibold hover:underline">
-              Forgot password?
+              {t('auth.forgotPassword')}
             </Link>
           </div>
         </div>
         {needsCode && (
           <div>
-            <label className="label" htmlFor="code">Authentication code</label>
+            <label className="label" htmlFor="code">{t('auth.authCode')}</label>
             <input
               id="code"
               className="input tnum tracking-widest"
@@ -116,17 +122,17 @@ export default function LoginPage() {
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
             />
-            <p className="text-xs text-neutral-500 mt-1">Open your authenticator app</p>
+            <p className="text-xs text-neutral-500 mt-1">{t('auth.openAuthenticator')}</p>
           </div>
         )}
         {waking !== null && (
           <div className="flex items-center gap-2 rounded-input border border-line bg-lavender px-3 py-2 text-xs text-neutral-600">
-            <Spinner /> Waking up the server ({waking}s). Free hosting sleeps when idle; this takes up to a minute.
+            <Spinner /> {t('auth.waking', { seconds: waking })}
           </div>
         )}
         <ErrorNote message={error} />
         <button type="submit" className="btn-primary w-full" disabled={busy}>
-          {busy && <Spinner />} {needsCode ? 'Verify and sign in' : 'Sign in'}
+          {busy && <Spinner />} {needsCode ? t('auth.verifyAndSignIn') : t('auth.signIn')}
         </button>
       </form>
 
@@ -135,7 +141,7 @@ export default function LoginPage() {
       {builtin && (
         <div className="mt-5 rounded-card border border-dashed border-line-strong bg-lavender px-3.5 py-3 text-xs text-neutral-600">
           <div>
-            Demo account: <code className="font-mono text-ink">demo@flaire.sa</code> /{' '}
+            {t('auth.demoAccount')}: <code className="font-mono text-ink">demo@flaire.sa</code> /{' '}
             <code className="font-mono text-ink">demo1234</code>
           </div>
           <button
@@ -146,15 +152,15 @@ export default function LoginPage() {
               setPassword('demo1234')
             }}
           >
-            Fill demo credentials
+            {t('auth.fillDemo')}
           </button>
         </div>
       )}
 
       <p className="text-sm text-neutral-500 mt-6">
-        New here?{' '}
+        {t('auth.newHere')}{' '}
         <Link to="/register" className="text-brand font-semibold hover:underline">
-          Create a company
+          {t('auth.createCompany')}
         </Link>
       </p>
     </AuthShell>

@@ -1,5 +1,6 @@
 import { Check, X } from 'lucide-react'
 import type { Decision } from '../types'
+import { useT } from '../lib/i18n'
 
 export type CheckKind = 'pass' | 'hold' | 'fail'
 
@@ -27,18 +28,21 @@ export function CheckIcon({ kind }: { kind: CheckKind }) {
 /** Policy check list rendered from decision.reasons, styled like the design. */
 export function PolicyCheck({
   decision,
-  label = 'Policy check',
+  label,
   className = '',
 }: {
   decision: Decision | null | undefined
+  /** null hides the heading; undefined uses the default "Policy check". */
   label?: string | null
   className?: string
 }) {
+  const t = useT()
+  const heading = label === undefined ? t('decision.policyCheck') : label
   return (
     <div className={className}>
-      {label && <div className="mono-label mb-2">{label}</div>}
+      {heading && <div className="mono-label mb-2">{heading}</div>}
       {!decision || !decision.reasons?.length ? (
-        <p className="text-sm text-neutral-500">No decision reasons recorded.</p>
+        <p className="text-sm text-neutral-500">{t('decision.noReasons')}</p>
       ) : (
         <ul className="space-y-2">
           {decision.reasons.map((r, i) => {

@@ -151,15 +151,15 @@ function ToolCard({ item }: { item: Extract<Item, { kind: 'tool' }> }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm"
+        className="w-full flex items-center gap-2 px-3 py-2 text-start text-sm"
         aria-expanded={open}
       >
-        {open ? <ChevronDown className="h-4 w-4 text-neutral-400" /> : <ChevronRight className="h-4 w-4 text-neutral-400" />}
+        {open ? <ChevronDown className="h-4 w-4 text-neutral-400" /> : <ChevronRight className="h-4 w-4 text-neutral-400 rtl-flip" />}
         <Wrench className="h-4 w-4 text-brand" />
         <span className="font-mono text-xs font-medium">{item.name}</span>
-        {item.status && <StatusPill status={item.status} className="ml-auto" />}
+        {item.status && <StatusPill status={item.status} className="ms-auto" />}
         {!item.status && item.output === undefined && (
-          <span className="ml-auto text-xs text-neutral-400">no result</span>
+          <span className="ms-auto text-xs text-neutral-400">no result</span>
         )}
       </button>
       {open && (
@@ -187,7 +187,7 @@ export function Transcript({ entries, assistantLabel = 'AI employee' }: { entrie
         if (it.kind === 'user')
           return (
             <div key={i} className="flex justify-end">
-              <div className="max-w-[85%] rounded-card rounded-br-md bg-brand text-white px-4 py-2.5 text-sm whitespace-pre-wrap">
+              <div className="max-w-[85%] rounded-card rounded-ee-md bg-brand text-white px-4 py-2.5 text-sm whitespace-pre-wrap">
                 <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-white/70 mb-1">
                   <User className="h-3 w-3" /> You
                 </div>
@@ -198,7 +198,7 @@ export function Transcript({ entries, assistantLabel = 'AI employee' }: { entrie
         if (it.kind === 'assistant')
           return (
             <div key={i} className="flex justify-start">
-              <div className="max-w-[85%] rounded-card rounded-bl-md bg-white border border-line px-4 py-2.5 text-sm whitespace-pre-wrap">
+              <div className="max-w-[85%] rounded-card rounded-es-md bg-white border border-line px-4 py-2.5 text-sm whitespace-pre-wrap">
                 <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide text-neutral-500 mb-1">
                   <Bot className="h-3 w-3" /> {assistantLabel}
                 </div>
@@ -213,7 +213,7 @@ export function Transcript({ entries, assistantLabel = 'AI employee' }: { entrie
             </div>
           )
         return (
-          <div key={i} className="pl-0 sm:pl-6">
+          <div key={i} className="ps-0 sm:ps-6">
             <ToolCard item={it} />
           </div>
         )

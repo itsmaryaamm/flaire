@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, Lock, X } from 'lucide-react'
 import { api, errorMessage } from '../../lib/api'
 import { useAuth } from '../../lib/auth'
+import { useT } from '../../lib/i18n'
 import { sar } from '../../lib/money'
 import type { PurchaseRequest } from '../../types'
 import { Sheet } from '../Sheet'
@@ -32,6 +33,7 @@ export function DecisionSheet({
   onDone: (result: PurchaseRequest, action: DecisionAction) => void
 }) {
   const { company } = useAuth()
+  const t = useT()
   const [password, setPassword] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -66,7 +68,7 @@ export function DecisionSheet({
   }
 
   const approving = action === 'approve'
-  const title = target ? (approving ? `Approve ${sar(target.amount)}` : `Decline ${sar(target.amount)}`) : ''
+  const title = target ? (approving ? t('decision.approveAmount', { amount: sar(target.amount) }) : t('decision.declineAmount', { amount: sar(target.amount) })) : ''
 
   return (
     <Sheet
@@ -83,30 +85,30 @@ export function DecisionSheet({
           }`}
         >
           {busy ? <Spinner className="h-5 w-5" /> : approving ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
-          {approving ? 'Confirm and pay' : 'Confirm decline'}
+          {approving ? t('decision.confirmPay') : t('decision.confirmDecline')}
         </button>
       }
     >
       {target && (
         <div className="space-y-3">
           <p className="text-sm text-neutral-600">
-            {approving ? 'Pay' : 'Decline'} <strong className="text-ink">{target.merchant}</strong> for {target.agent_name}.
+            {approving ? t('decision.pay') : t('common.decline')} <strong className="text-ink">{target.merchant}</strong> {t('decision.forEmployee', { name: target.agent_name })}
           </p>
           {target.needs_second_approver && (
             <div className="flex items-start gap-2 rounded-input border border-amber-300 bg-warn-tint px-3 py-2.5 text-xs text-warn">
               <Lock className="h-4 w-4 shrink-0 mt-px" />
               <span>
-                Two-person rule. {target.firstApprover ? `First approval by ${target.firstApprover}. ` : ''}A different approver must confirm before money moves.
+                {t('decision.twoPerson')} {target.firstApprover ? t('decision.firstBy', { name: target.firstApprover }) : ''} {t('decision.differentApprover')}
               </span>
             </div>
           )}
           <div>
-            <label className="label" htmlFor="ds-note">Note (optional)</label>
-            <input id="ds-note" className="input h-11" placeholder="For the ledger" value={note} onChange={(e) => setNote(e.target.value)} />
+            <label className="label" htmlFor="ds-note">{t('decision.noteOptional')}</label>
+            <input id="ds-note" className="input h-11" placeholder={t('decision.forLedger')} value={note} onChange={(e) => setNote(e.target.value)} />
           </div>
           <div>
             <label className="label" htmlFor="ds-password">
-              Your password{needsPassword ? '' : ' (optional)'}
+              {needsPassword ? t('decision.yourPassword') : t('decision.yourPasswordOptional')}
             </label>
             <input
               id="ds-password"

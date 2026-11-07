@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { errorMessage } from './api'
+import { moneyLocale } from './money'
+import { dateLocaleTag, translate } from './i18n'
 
 interface FetchState<T> {
   data: T | null
@@ -49,7 +51,7 @@ export function formatDate(iso: string | null | undefined, withTime = true): str
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString('en-GB', {
+  return d.toLocaleString(dateLocaleTag(moneyLocale()), {
     day: '2-digit',
     month: 'short',
     ...(withTime ? { hour: '2-digit', minute: '2-digit' } : {}),
@@ -61,19 +63,20 @@ export function formatTime(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleTimeString(dateLocaleTag(moneyLocale()), { hour: '2-digit', minute: '2-digit' })
 }
 
 export function timeAgo(iso: string | null | undefined): string {
-  if (!iso) return 'never'
+  const loc = moneyLocale()
+  if (!iso) return translate(loc, 'time.never')
   const diff = Date.now() - new Date(iso).getTime()
   if (Number.isNaN(diff)) return iso
   const s = Math.floor(diff / 1000)
-  if (s < 60) return 'just now'
+  if (s < 60) return translate(loc, 'time.justNow')
   const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
+  if (m < 60) return translate(loc, 'time.minutesAgo', { n: m })
   const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
+  if (h < 24) return translate(loc, 'time.hoursAgo', { n: h })
   const d = Math.floor(h / 24)
-  return `${d}d ago`
+  return translate(loc, 'time.daysAgo', { n: d })
 }

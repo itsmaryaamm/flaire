@@ -46,6 +46,8 @@ interface AuthState {
   refresh: () => Promise<void>
   /** Replace the company in context without a network call. */
   setCompany: (c: Company) => void
+  /** Builtin mode: store a token and session returned by another endpoint (invite accept). */
+  adoptSession: (data: AuthResponse) => void
 }
 
 export class ProviderDisabledError extends Error {
@@ -269,8 +271,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCompanyState(c)
         setNeedsOnboarding(false)
       },
+      adoptSession: applyAuth,
     }),
-    [user, company, needsOnboarding, provider, loading, login, register, forgot, signInWithGoogle, logout, refresh],
+    [user, company, needsOnboarding, provider, loading, login, register, forgot, signInWithGoogle, logout, refresh, applyAuth],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

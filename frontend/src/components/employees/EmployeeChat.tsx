@@ -10,24 +10,22 @@ import { StatusPill } from '../StatusPill'
 import { Spinner } from '../Spinner'
 import { ErrorNote } from '../ErrorNote'
 import { ReasonsList } from '../DecisionDetails'
+import { useT } from '../../lib/i18n'
 
-const SUGGESTIONS = [
-  'Launch a SAR 300 Google Ads test in Riyadh',
-  'What have you bought this month?',
-  'Plan a two-week Snapchat campaign, SAR 950',
-]
+const SUGGESTION_KEYS = ['chat.s1', 'chat.s2', 'chat.s3']
 
 function CreatedRequests({ items }: { items: PurchaseRequest[] }) {
+  const t = useT()
   if (items.length === 0) return null
   return (
     <div className="space-y-2">
-      <div className="mono-label">Purchase requests in this conversation</div>
+      <div className="mono-label">{t('chat.requestsInConversation')}</div>
       {items.map((pr) => (
         <div key={pr.id} className="rounded-card border border-line bg-white px-3.5 py-3">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-semibold text-sm">{pr.merchant}</span>
             <span className="text-xs text-neutral-500">{pr.category}</span>
-            <span className="text-sm font-semibold tnum ml-auto">{sar(pr.amount)}</span>
+            <span className="text-sm font-semibold tnum ms-auto">{sar(pr.amount)}</span>
             <StatusPill status={pr.status} />
           </div>
           {pr.description && <p className="text-xs text-neutral-600 mt-1.5">{pr.description}</p>}
@@ -40,6 +38,7 @@ function CreatedRequests({ items }: { items: PurchaseRequest[] }) {
 
 /** "Talk to {name}": a chat over POST /agents/:id/chat with threads from GET /agents/:id/runs. */
 export function EmployeeChat({ agent, onChanged }: { agent: Agent; onChanged?: () => void }) {
+  const t = useT()
   const runs = useFetch(() => api.get<RunOut[]>(`/agents/${agent.id}/runs`).then((r) => r.data), [agent.id])
   const [runId, setRunId] = useState<number | null>(null)
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
@@ -66,7 +65,7 @@ export function EmployeeChat({ agent, onChanged }: { agent: Agent; onChanged?: (
       setMode(null)
       return
     }
-    const run = threads.find((t) => t.run_id === id)
+    const run = threads.find((th) => th.run_id === id)
     setEntries(run?.transcript ?? [])
     setRequests(run?.purchase_requests ?? [])
     setMode(run?.mode ?? null)
@@ -101,8 +100,8 @@ export function EmployeeChat({ agent, onChanged }: { agent: Agent; onChanged?: (
       <div className="px-4 pt-4 pb-3 border-b border-line">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="text-sm font-bold truncate">Talk to {agent.name}</h2>
-            {mode === 'scripted' && <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-neutral-400 mt-0.5">basic mode</div>}
+            <h2 className="text-sm font-bold truncate">{t('chat.talkTo', { name: agent.name })}</h2>
+            {mode === 'scripted' && <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-neutral-400 mt-0.5">{t('assistant.basicMode')}</div>}
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             {threads.length > 0 && (
@@ -112,19 +111,19 @@ export function EmployeeChat({ agent, onChanged }: { agent: Agent; onChanged?: (
                   className="input h-8 py-0 text-xs w-auto max-w-[160px]"
                   value={runId ?? ''}
                   onChange={(e) => openThread(e.target.value ? Number(e.target.value) : null)}
-                  aria-label="Previous conversations"
+                  aria-label={t('chat.previous')}
                 >
-                  <option value="">Previous conversations</option>
-                  {threads.map((t) => (
-                    <option key={t.run_id} value={t.run_id}>
-                      {formatDate(t.created_at)} · {(t.task || 'Conversation').slice(0, 40)}
+                  <option value="">{t('chat.previous')}</option>
+                  {threads.map((th) => (
+                    <option key={th.run_id} value={th.run_id}>
+                      {formatDate(th.created_at)} · {(th.task || t('chat.conversation')).slice(0, 40)}
                     </option>
                   ))}
                 </select>
               </label>
             )}
             <button type="button" className="btn-ghost text-xs px-2" onClick={() => openThread(null)} disabled={runId === null && entries.length === 0}>
-              <MessageSquarePlus className="h-3.5 w-3.5" /> New
+              <MessageSquarePlus className="h-3.5 w-3.5" /> {t('common.new')}
             </button>
           </div>
         </div>
@@ -133,17 +132,14 @@ export function EmployeeChat({ agent, onChanged }: { agent: Agent; onChanged?: (
       <div ref={listRef} className="flex-1 lg:overflow-y-auto px-4 py-4 space-y-4 bg-lavender/40">
         {empty && (
           <div className="text-sm text-neutral-600">
-            <p>
-              Give {agent.name} a task in plain language. It checks its budget, asks Flaire for purchases, and Flaire decides. You approve anything
-              above {sar(agent.approval_threshold)}.
-            </p>
+            <p>{t('chat.intro', { name: agent.name, amount: sar(agent.approval_threshold) })}</p>
             <div className="flex flex-wrap gap-1.5 mt-3">
-              {SUGGESTIONS.map((s) => (
+              {SUGGESTION_KEYS.map((k) => t(k)).map((s) => (
                 <button
                   key={s}
                   type="button"
                   onClick={() => void send(s)}
-                  className="rounded-pill border border-line-strong bg-white px-3 py-1.5 text-xs font-medium hover:border-brand hover:text-brand text-left"
+                  className="rounded-pill border border-line-strong bg-white px-3 py-1.5 text-xs font-medium hover:border-brand hover:text-brand text-start"
                 >
                   {s}
                 </button>
@@ -154,8 +150,8 @@ export function EmployeeChat({ agent, onChanged }: { agent: Agent; onChanged?: (
         {entries.length > 0 && <Transcript entries={entries} assistantLabel={agent.name} />}
         {busy && (
           <div className="flex justify-start">
-            <div className="rounded-card rounded-bl-md bg-white border border-line px-3.5 py-2.5 text-sm text-neutral-500 inline-flex items-center gap-2">
-              <Spinner className="h-3.5 w-3.5" /> Thinking...
+            <div className="rounded-card rounded-es-md bg-white border border-line px-3.5 py-2.5 text-sm text-neutral-500 inline-flex items-center gap-2">
+              <Spinner className="h-3.5 w-3.5" /> {t('assistant.thinking')}
             </div>
           </div>
         )}
@@ -172,13 +168,13 @@ export function EmployeeChat({ agent, onChanged }: { agent: Agent; onChanged?: (
       >
         <input
           className="input h-11 flex-1"
-          placeholder={agent.status === 'paused' ? `${agent.name} is paused; purchases will be blocked` : `Message ${agent.name}`}
+          placeholder={agent.status === 'paused' ? t('chat.pausedPlaceholder', { name: agent.name }) : t('chat.messagePlaceholder', { name: agent.name })}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           disabled={busy}
         />
-        <button type="submit" className="btn-primary h-11 w-11 p-0 shrink-0" disabled={busy || !input.trim()} aria-label="Send">
-          <Send className="h-4 w-4" />
+        <button type="submit" className="btn-primary h-11 w-11 p-0 shrink-0" disabled={busy || !input.trim()} aria-label={t('assistant.send')}>
+          <Send className="h-4 w-4 rtl-flip" />
         </button>
       </form>
     </section>

@@ -9,6 +9,7 @@ import { CopyBox } from '../CopyBox'
 import { ErrorNote } from '../ErrorNote'
 import { Spinner } from '../Spinner'
 import { StatusPill } from '../StatusPill'
+import { useT } from '../../lib/i18n'
 
 interface TotpSetup {
   secret: string
@@ -17,7 +18,7 @@ interface TotpSetup {
   qr_svg: string
 }
 
-const APPROVER_ROLES = ['owner', 'finance']
+const APPROVER_ROLES = ['owner', 'admin', 'finance']
 
 function onlyDigits(v: string): string {
   return v.replace(/\D/g, '').slice(0, 6)
@@ -27,6 +28,7 @@ function onlyDigits(v: string): string {
 export function SecurityCard() {
   const { user, company, refresh, setCompany, provider } = useAuth()
   const toast = useToast()
+  const t = useT()
   const supabaseMode = provider === 'supabase'
   const canSetPolicy = !!user?.role && APPROVER_ROLES.includes(user.role)
 
@@ -41,17 +43,17 @@ export function SecurityCard() {
     e.preventDefault()
     setPwError(null)
     if (next.length < 8) {
-      setPwError('New password must be at least 8 characters.')
+      setPwError(t('security.min8'))
       return
     }
     if (next !== confirm) {
-      setPwError('New passwords do not match.')
+      setPwError(t('security.noMatch'))
       return
     }
     setPwBusy(true)
     try {
       await api.post('/auth/change-password', { current_password: current, new_password: next })
-      toast.success('Password changed.')
+      toast.success(t('security.passwordChanged'))
       setCurrent('')
       setNext('')
       setConfirm('')
@@ -89,7 +91,7 @@ export function SecurityCard() {
     setActivateBusy(true)
     try {
       await api.post('/auth/2fa/enable', { code: activateCode.trim() })
-      toast.success('2FA is on')
+      toast.success(t('security.2faOn'))
       setSetup(null)
       setActivateCode('')
       await refresh()
@@ -112,7 +114,7 @@ export function SecurityCard() {
     setOffBusy(true)
     try {
       await api.post('/auth/2fa/disable', { password: offPassword, code: offCode.trim() })
-      toast.success('2FA is off.')
+      toast.success(t('security.2faOff'))
       setOffOpen(false)
       setOffPassword('')
       setOffCode('')
@@ -134,7 +136,7 @@ export function SecurityCard() {
     try {
       const { data } = await api.patch<Company>('/company', { require_2fa_for_approvers })
       setCompany(data)
-      toast.success(require_2fa_for_approvers ? 'Approvers now need 2FA.' : '2FA is optional for approvers.')
+      toast.success(require_2fa_for_approvers ? t('security.approversNeed2fa') : t('security.2faOptional'))
     } catch (err) {
       setPolicyError(errorMessage(err))
     } finally {
@@ -148,20 +150,20 @@ export function SecurityCard() {
     <section id="security" className="card-lg p-5 scroll-mt-20">
       <div className="flex items-center gap-2">
         <KeyRound className="h-4 w-4 text-brand" />
-        <h3 className="font-bold">Security</h3>
+        <h3 className="font-bold">{t('security.title')}</h3>
       </div>
-      <p className="text-xs text-neutral-500 mt-0.5 mb-4">Your password and second factor. Approvals are only as safe as the account that makes them.</p>
+      <p className="text-xs text-neutral-500 mt-0.5 mb-4">{t('security.hint')}</p>
 
       {/* Change password (builtin auth only; Supabase manages credentials itself) */}
       {supabaseMode ? (
         <p className="rounded-input border border-line bg-lavender px-3 py-2 text-xs text-neutral-600">
-          Password and email are managed by your sign-in. Use Forgot password on the sign-in page to change it.
+          {t('security.managedBySignIn')}
         </p>
       ) : (
       <form onSubmit={changePassword} className="space-y-3">
-        <h4 className="text-sm font-semibold">Change password</h4>
+        <h4 className="text-sm font-semibold">{t('security.changePassword')}</h4>
         <div>
-          <label className="label" htmlFor="sec-current">Current password</label>
+          <label className="label" htmlFor="sec-current">{t('security.currentPassword')}</label>
           <input
             id="sec-current"
             type="password"
@@ -174,7 +176,7 @@ export function SecurityCard() {
         </div>
         <div className="grid sm:grid-cols-2 gap-3">
           <div>
-            <label className="label" htmlFor="sec-next">New password</label>
+            <label className="label" htmlFor="sec-next">{t('security.newPassword')}</label>
             <input
               id="sec-next"
               type="password"
@@ -187,7 +189,7 @@ export function SecurityCard() {
             />
           </div>
           <div>
-            <label className="label" htmlFor="sec-confirm">Confirm new password</label>
+            <label className="label" htmlFor="sec-confirm">{t('security.confirmNewPassword')}</label>
             <input
               id="sec-confirm"
               type="password"
@@ -202,9 +204,9 @@ export function SecurityCard() {
         </div>
         <ErrorNote message={pwError} />
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs text-neutral-500">At least 8 characters.</p>
+          <p className="text-xs text-neutral-500">{t('auth.atLeast8')}</p>
           <button type="submit" className="btn-secondary" disabled={pwBusy || !current || !next || !confirm}>
-            {pwBusy && <Spinner />} Save
+            {pwBusy && <Spinner />} {t('common.save')}
           </button>
         </div>
       </form>
@@ -216,20 +218,20 @@ export function SecurityCard() {
       <div>
         <div className="flex items-center gap-2">
           <Smartphone className="h-4 w-4 text-neutral-500" />
-          <h4 className="text-sm font-semibold">Two-factor authentication</h4>
+          <h4 className="text-sm font-semibold">{t('security.twoFactor')}</h4>
           {enabled && (
             <StatusPill tone="green" dot>
-              On
+              {t('common.on')}
             </StatusPill>
           )}
         </div>
 
         {!enabled && (
           <div className="mt-2">
-            <p className="text-xs text-neutral-600">Protect approvals with a 6-digit code from an authenticator app.</p>
+            <p className="text-xs text-neutral-600">{t('security.protect')}</p>
             {!setup && (
               <button type="button" className="btn-primary mt-3" onClick={startSetup} disabled={setupBusy}>
-                {setupBusy && <Spinner />} Set up 2FA
+                {setupBusy && <Spinner />} {t('security.setup2fa')}
               </button>
             )}
             {setup && (
@@ -237,20 +239,20 @@ export function SecurityCard() {
                 <div className="flex flex-col sm:flex-row gap-4">
                   <img
                     src={setup.qr_svg}
-                    alt="QR code for your authenticator app"
+                    alt={t('security.qrAlt')}
                     width={180}
                     height={180}
                     className="h-[180px] w-[180px] shrink-0 rounded-card border border-line bg-white p-2"
                   />
                   <div className="flex-1 min-w-0 space-y-2">
                     <p className="text-xs text-neutral-600">
-                      Scan with Google Authenticator, 1Password, Authy or any TOTP app. Cannot scan? Enter this key manually.
+                      {t('security.scanHint')}
                     </p>
                     <CopyBox value={setup.secret} />
                   </div>
                 </div>
                 <div>
-                  <label className="label" htmlFor="sec-activate-code">Code from the app</label>
+                  <label className="label" htmlFor="sec-activate-code">{t('security.codeFromApp')}</label>
                   <div className="flex gap-2">
                     <input
                       id="sec-activate-code"
@@ -265,7 +267,7 @@ export function SecurityCard() {
                       onChange={(e) => setActivateCode(onlyDigits(e.target.value))}
                     />
                     <button type="submit" className="btn-primary" disabled={activateBusy || activateCode.length !== 6}>
-                      {activateBusy && <Spinner />} Activate
+                      {activateBusy && <Spinner />} {t('security.activate')}
                     </button>
                     <button
                       type="button"
@@ -275,7 +277,7 @@ export function SecurityCard() {
                         setTotpError(null)
                       }}
                     >
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                   </div>
                 </div>
@@ -286,7 +288,7 @@ export function SecurityCard() {
 
         {enabled && (
           <div className="mt-2">
-            <p className="text-xs text-neutral-600">Every sign-in asks for a 6-digit code from your authenticator app.</p>
+            <p className="text-xs text-neutral-600">{t('security.everySignIn')}</p>
             {!offOpen && (
               <button
                 type="button"
@@ -296,15 +298,15 @@ export function SecurityCard() {
                   setTotpError(null)
                 }}
               >
-                Turn off
+                {t('security.turnOff')}
               </button>
             )}
             {offOpen && (
               <form onSubmit={disable} className="mt-3 rounded-card border border-line bg-lavender p-4 space-y-3">
-                <p className="text-xs text-neutral-600">Confirm with your password and a current code.</p>
+                <p className="text-xs text-neutral-600">{t('security.confirmWith')}</p>
                 <div className="grid sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="label" htmlFor="sec-off-password">Password</label>
+                    <label className="label" htmlFor="sec-off-password">{t('auth.password')}</label>
                     <input
                       id="sec-off-password"
                       type="password"
@@ -316,7 +318,7 @@ export function SecurityCard() {
                     />
                   </div>
                   <div>
-                    <label className="label" htmlFor="sec-off-code">Authentication code</label>
+                    <label className="label" htmlFor="sec-off-code">{t('auth.authCode')}</label>
                     <input
                       id="sec-off-code"
                       className="input tnum tracking-widest"
@@ -333,7 +335,7 @@ export function SecurityCard() {
                 </div>
                 <div className="flex gap-2">
                   <button type="submit" className="btn-danger" disabled={offBusy || !offPassword || offCode.length !== 6}>
-                    {offBusy && <Spinner />} Turn off 2FA
+                    {offBusy && <Spinner />} {t('security.turnOff2fa')}
                   </button>
                   <button
                     type="button"
@@ -343,7 +345,7 @@ export function SecurityCard() {
                       setTotpError(null)
                     }}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </div>
               </form>
@@ -361,7 +363,7 @@ export function SecurityCard() {
           <div>
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-neutral-500" />
-              <h4 className="text-sm font-semibold">Company policy</h4>
+              <h4 className="text-sm font-semibold">{t('security.companyPolicy')}</h4>
             </div>
             <label className="mt-2 flex items-start gap-3 text-sm cursor-pointer">
               <input
@@ -372,8 +374,8 @@ export function SecurityCard() {
                 onChange={(e) => void setPolicy(e.target.checked)}
               />
               <span>
-                <span className="font-semibold">Require 2FA for everyone who can approve</span>
-                <span className="block text-xs text-neutral-500">Approvers without 2FA cannot approve or reject until they enable it.</span>
+                <span className="font-semibold">{t('security.require2fa')}</span>
+                <span className="block text-xs text-neutral-500">{t('security.require2faHint')}</span>
               </span>
             </label>
             <ErrorNote message={policyError} className="mt-3" />
