@@ -58,8 +58,9 @@ def test_sar_500_purchase_end_to_end(ctx):
     assert pr["transaction_id"]
     tx = client.get(f"/api/v1/transactions/{pr['transaction_id']}", headers=ctx["H"]).json()
     assert tx["status"] == "settled" and tx["provider"] == "mock_snb" and tx["amount"] == 50_000
-    card = client.get("/api/v1/cards", headers=ctx["H"]).json()[0]
-    assert card["available_balance"] == 1_000_000 - 50_000
+    agent = client.get(f"/api/v1/agents/{ctx['agent']['id']}", headers=ctx["H"]).json()
+    assert agent["card"] and agent["card"]["available_balance"] == agent["monthly_limit"] - 50_000
+    assert tx["fee"] == round(50_000 * 15 / 10_000)
     dash = client.get("/api/v1/dashboard/summary", headers=ctx["H"]).json()
     assert dash["totals"]["spent_this_period"] == 50_000
     assert dash["departments"][0]["remaining"] == 450_000
@@ -102,7 +103,8 @@ def test_reject(ctx):
     assert pr["status"] == "pending_approval"
     out = client.post(f"/api/v1/approvals/{pr['id']}/reject", json={"note": "no", "password": "password123"}, headers=ctx["H"]).json()
     assert out["status"] == "rejected"
-    assert client.get("/api/v1/cards", headers=ctx["H"]).json()[0]["available_balance"] == 1_000_000 - 150_000
+    agent = client.get(f"/api/v1/agents/{ctx['agent']['id']}", headers=ctx["H"]).json()
+    assert agent["card"]["available_balance"] == agent["monthly_limit"] - 150_000
 
 
 def test_department_budget_enforced(ctx):
@@ -497,3 +499,67 @@ def test_supabase_token_onboarding_and_delete(ctx, monkeypatch):
         assert me2["needs_onboarding"] is True  # a fresh user row again, no company
     finally:
         st.supabase_url = st.supabase_anon_key = st.supabase_jwt_secret = None
+
+
+def test_asa_realtime_authorization_and_fees(ctx):
+    """Lithic asks Flaire before a card transaction: only Flaire-approved purchases on that employee's card pass."""
+    from app.core import guard
+    from app.core.db import SessionLocal
+    from app.models import Agent, Card
+    guard.reset()
+    H = ctx["H"]
+    db = SessionLocal()
+    agent = db.get(Agent, ctx["agent"]["id"]); card = db.get(Card, agent.card_id)
+    # pretend this employee's card is a Lithic card with a token
+    card.provider = "lithic"; card.provider_token = "card_tok_123"; db.commit(); db.close()
+    import itertools
+    seq = itertools.count()
+    asa = lambda amount, status="AUTHORIZATION": client.post("/api/v1/webhooks/lithic/asa", json={"token": f"tx_{next(seq)}", "status": status, "card": {"token": "card_tok_123"},
+                                                                                                 "amounts": {"merchant": {"amount": amount}}, "merchant": {"descriptor": "GOOGLE ADS"}}).json()
+    # nothing approved yet → declined
+    assert asa(12_300)["result"] == "UNAUTHORIZED_MERCHANT"
+    # Flaire approves a purchase (the mock adapter can't settle a 'lithic' card, so the request ends 'failed' at payment, but the approval stands)
+    db = SessionLocal(); card = db.get(Card, agent.card_id); card.provider = "mock_snb"; db.commit(); db.close()
+    pr = buy(ctx, 12_300, merchant="Google Ads")
+    assert pr["status"] == "completed"
+    db = SessionLocal(); card = db.get(Card, agent.card_id); card.provider = "lithic"; db.commit(); db.close()
+    # now the exact amount is approved for this card, once
+    assert asa(12_300)["result"] == "APPROVED"
+    assert asa(12_300)["result"] == "UNAUTHORIZED_MERCHANT"   # the approval cannot be reused
+    first_tok = client.post("/api/v1/webhooks/lithic/asa", json={"token": "replay_1", "status": "AUTHORIZATION", "card": {"token": "card_tok_123"}, "amounts": {"merchant": {"amount": 5}}}).json()["result"]
+    assert client.post("/api/v1/webhooks/lithic/asa", json={"token": "replay_1", "status": "AUTHORIZATION", "card": {"token": "card_tok_123"}, "amounts": {"merchant": {"amount": 5}}}).json()["result"] == first_tok  # idempotent
+    assert asa(99_999_999)["result"] == "INSUFFICIENT_FUNDS"
+    # paused employee → CARD_PAUSED
+    client.patch(f"/api/v1/agents/{agent.id}", json={"status": "paused"}, headers=H)
+    assert asa(100)["result"] == "CARD_PAUSED"
+    client.patch(f"/api/v1/agents/{agent.id}", json={"status": "active"}, headers=H)
+    db = SessionLocal(); card = db.get(Card, agent.card_id); card.provider = "mock_snb"; db.commit(); db.close()
+    # fee statement: 0.15% of settled volume
+    st = client.get("/api/v1/fees/statement", headers=H).json()
+    assert st["fee_rate_bps"] == 15 and st["fees"] == sum(round(l["amount"] * 15 / 10_000) for l in st["lines"]) and st["fees"] > 0
+    assert client.get("/api/v1/settings/lithic/status", headers=H).json()["configured"] is False
+
+
+def test_employee_chat_and_assistant(ctx):
+    from app.core import guard
+    guard.reset()
+    H = ctx["H"]; aid = ctx["agent"]["id"]
+    # vague ask → clarifying question, no purchase
+    r = client.post(f"/api/v1/agents/{aid}/chat", json={"message": "run some ads for us"}, headers=H).json()
+    assert r["purchase_requests"] == [] and "which" in r["transcript"][-1]["content"].lower()
+    # specific ask → purchase, same thread
+    r2 = client.post(f"/api/v1/agents/{aid}/chat", json={"message": "SAR 40 on Google Ads for the Riyadh launch", "run_id": r["run_id"]}, headers=H).json()
+    assert r2["run_id"] == r["run_id"] and r2["purchase_requests"][0]["status"] == "completed"
+    # duplicate ask → refuses to buy twice
+    r3 = client.post(f"/api/v1/agents/{aid}/chat", json={"message": "SAR 40 on Google Ads for the Riyadh launch", "run_id": r["run_id"]}, headers=H).json()
+    assert len(r3["purchase_requests"]) == 1 and "twice" in r3["transcript"][-1]["content"]
+    # assistant: what needs me, prepare approval (never executes)
+    client.patch(f"/api/v1/agents/{aid}", json={"monthly_limit": 5_000_000, "per_transaction_limit": 500_000}, headers=H)
+    client.patch("/api/v1/departments/%d" % ctx["dept"]["id"], json={"monthly_budget": 9_000_000}, headers=H)
+    pr = buy(ctx, 120_000, merchant="Snapchat Ads")
+    assert pr["status"] == "pending_approval", pr["decision"]
+    a = client.post("/api/v1/assistant/chat", json={"message": "what needs me?"}, headers=H).json()
+    assert "Snapchat" in a["reply"] and a["actions"] == []
+    a2 = client.post("/api/v1/assistant/chat", json={"message": f"approve #{pr['id']}"}, headers=H).json()
+    assert a2["actions"][0]["action"] == "approve" and a2["actions"][0]["request_id"] == pr["id"]
+    assert client.get(f"/api/v1/purchase-requests/{pr['id']}", headers=H).json()["status"] == "pending_approval"  # still pending: user must confirm

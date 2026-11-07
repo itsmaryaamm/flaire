@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.account import router as account_router
+from app.api.asa import router as asa_router
 from app.api.auth_extra import router as auth_extra_router
 from app.api.mcp import router as mcp_router
 from app.api.oauth import router as oauth_router, well_known
@@ -60,6 +61,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(router, prefix="/api/v1")
 app.include_router(auth_extra_router, prefix="/api/v1")
 app.include_router(account_router, prefix="/api/v1")
+app.include_router(asa_router, prefix="/api/v1")
 app.include_router(mcp_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(oauth_router, prefix="/api/v1")

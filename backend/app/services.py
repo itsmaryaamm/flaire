@@ -104,13 +104,15 @@ def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amou
 
 # ---------------- payment ----------------
 def pick_card(db: Session, company: Company, pr: PurchaseRequest) -> Card | None:
-    q = db.query(Card).filter(Card.company_id == company.id, Card.status == "active")
-    if pr.card_id:
-        return q.filter(Card.id == pr.card_id).first()
-    dept_card = q.filter(Card.department_id == pr.department_id).first()
-    if dept_card:
-        return dept_card
-    return q.filter(Card.is_default.is_(True)).first() or q.first()
+    """Every AI employee pays with its own card and nothing else. Issue one on the fly if it is missing."""
+    agent = db.get(Agent, pr.agent_id)
+    card = db.get(Card, agent.card_id) if agent and agent.card_id else None
+    if card is None and agent is not None:
+        from app.cards import issue_card_for_agent
+        card = issue_card_for_agent(db, company, agent)
+    if card and card.status == "active":
+        return card
+    return None
 
 
 def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision: Decision) -> Transaction | None:
@@ -131,7 +133,7 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
     card = pick_card(db, company, pr)
     if not card:
         pr.status = "failed"
-        pr.decision = {**pr.decision, "payment_error": "No active card available."}
+        pr.decision = {**pr.decision, "payment_error": "This AI employee has no active card. Connect Lithic in Settings → Payments or unpause the employee."}
         audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.failed", details={"request_id": pr.id, "reason": "no card"})
         return None
 
@@ -143,10 +145,17 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
         pr.decision = {**pr.decision, "payment_error": "Budget was consumed by a concurrent purchase."}
         audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.rejected", details={"request_id": pr.id, "reasons": ["concurrent budget exhaustion"]})
         return None
+    # The purchase is approved by Flaire before the card is touched, so the issuer's real-time check (ASA) can match it.
+    pr.status = "approved"
+    pr.decided_at = utcnow()
+    db.flush()
+    db.commit()
     adapter = get_adapter(card.provider, company)
     result = adapter.authorize(card, pr.amount, pr.merchant, f"FLAIRE*{pr.merchant}")
+    fee = round(pr.amount * (company.fee_rate_bps or 0) / 10_000) if result.ok else 0
     tx = Transaction(company_id=company.id, purchase_request_id=pr.id, card_id=card.id, provider=card.provider, provider_ref=result.provider_ref,
-                     amount=pr.amount, currency=pr.currency, merchant=pr.merchant, status=result.status, decline_reason=result.decline_reason)
+                     amount=pr.amount, currency=pr.currency, merchant=pr.merchant, status=result.status, decline_reason=result.decline_reason,
+                     fee=fee, fee_rate_bps=company.fee_rate_bps or 0)
     db.add(tx)
     db.flush()
     pr.transaction_id = tx.id
@@ -234,6 +243,8 @@ def set_kill_switch(db: Session, company: Company, user: User, enabled: bool, re
     company.kill_switch = enabled
     company.kill_switch_reason = reason if enabled else None
     frozen_ids: list[int] = []
+    if enabled:
+        pass
     if enabled:
         for card in db.query(Card).filter(Card.company_id == company.id, Card.status == "active").all():
             card.status = "frozen"

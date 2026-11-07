@@ -30,6 +30,9 @@ class Company(Base):
     new_merchant_review_from: Mapped[int] = mapped_column(Integer, default=20_000)  # halalas; 0 disables new-merchant review
     notify_threshold: Mapped[int] = mapped_column(Integer, default=0)  # halalas; push/email approvers only for holds at/above this
     lithic_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted, entered in Settings → Payments
+    lithic_asa_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)  # ASA HMAC secret, encrypted
+    lithic_asa_enrolled: Mapped[bool] = mapped_column(Boolean, default=False)
+    fee_rate_bps: Mapped[int] = mapped_column(Integer, default=15)  # Flaire fee: 0.15% of every settled transaction
     require_2fa_for_approvers: Mapped[bool] = mapped_column(Boolean, default=False)
     onboarding_done: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -93,6 +96,7 @@ class Agent(Base):
     max_requests_per_hour: Mapped[int] = mapped_column(Integer, default=10)
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     key_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # connector link expiry
+    card_id: Mapped[int | None] = mapped_column(ForeignKey("cards.id"), nullable=True)  # this employee's own card
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     company: Mapped[Company] = relationship(back_populates="agents")
@@ -105,6 +109,7 @@ class Card(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"))
     department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)
+    agent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)  # owner employee (one card per AI employee)
     label: Mapped[str] = mapped_column(String(120))
     provider: Mapped[str] = mapped_column(String(30))
     last4: Mapped[str] = mapped_column(String(4))
@@ -156,6 +161,8 @@ class Transaction(Base):
     merchant: Mapped[str] = mapped_column(String(200))
     status: Mapped[str] = mapped_column(String(20))  # authorized | settled | declined | reversed
     decline_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    fee: Mapped[int] = mapped_column(Integer, default=0)            # Flaire fee in halalas (company.fee_rate_bps of amount)
+    fee_rate_bps: Mapped[int] = mapped_column(Integer, default=15)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     card: Mapped[Card] = relationship()

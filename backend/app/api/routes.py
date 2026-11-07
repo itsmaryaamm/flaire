@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from datetime import timedelta as _td
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -197,6 +198,8 @@ def create_agent(body: AgentIn, user: User = Depends(require_approver), db: Sess
     db.add(a)
     db.flush()
     audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.created", details={"id": a.id, "name": a.name, "role": a.role})
+    from app.cards import issue_card_for_agent
+    issue_card_for_agent(db, company_of(user, db), a, actor=user.full_name)
     db.commit()
     db.refresh(a)
     return AgentCreatedOut(agent=agent_out(a), api_key=plain)
@@ -222,6 +225,8 @@ def patch_agent(agent_id: int, body: AgentPatch, user: User = Depends(require_ap
     for k, v in changes.items():
         setattr(a, k, v)
     audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.updated", details={"id": a.id, **changes})
+    from app.cards import sync_card_with_agent
+    sync_card_with_agent(db, company_of(user, db), a)
     db.commit()
     db.refresh(a)
     return agent_out(a)
@@ -393,6 +398,8 @@ def list_cards(user: User = Depends(get_current_user), db: Session = Depends(get
 def create_card(body: CardIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
     if body.provider not in MOCK_PROVIDERS and body.provider != "lithic":
         raise HTTPException(422, f"provider must be one of {', '.join(MOCK_PROVIDERS)}, lithic")
+    if body.provider in MOCK_PROVIDERS and settings.env == "prod":
+        raise HTTPException(422, "Simulated bank cards are not available. Cards are issued per AI employee through Lithic.")
     if body.department_id:
         _dept(db, user, body.department_id)
     try:
@@ -617,3 +624,45 @@ def revoke_connection(conn_id: int, user: User = Depends(require_approver), db: 
 def connector_info(request: Request, user: User = Depends(get_current_user)):
     from app.api.oauth import base_url
     return {"url": f"{base_url(request)}/api/v1/mcp", "auth": "Sign in now", "steps": ["Claude → Settings → Connectors → Add custom connector", "Name: Flaire. URL: the one above. Authentication: Sign in now.", "Click Add, sign in with your Flaire email and password, choose which AI employee this Claude is."]}
+
+
+# ====================================================== Flaire fees
+@router.get("/fees/statement", tags=["audit"])
+def fee_statement(month: str | None = None, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Flaire's fee (company.fee_rate_bps of every settled transaction), by month. month=YYYY-MM, default current."""
+    from datetime import date as _date
+    c = company_of(user, db)
+    today = _date.today()
+    y, m = (int(month[:4]), int(month[5:7])) if month else (today.year, today.month)
+    start = datetime(y, m, 1, tzinfo=timezone.utc)
+    end = datetime(y + (m // 12), (m % 12) + 1, 1, tzinfo=timezone.utc)
+    rows = db.query(Transaction).filter(Transaction.company_id == c.id, Transaction.status.in_(["settled", "authorized"]), Transaction.created_at >= start, Transaction.created_at < end).all()
+    volume = sum(t.amount for t in rows)
+    fees = sum(t.fee or 0 for t in rows)
+    return {"month": f"{y:04d}-{m:02d}", "fee_rate_bps": c.fee_rate_bps, "transactions": len(rows), "volume": volume, "fees": fees,
+            "lines": [{"id": t.id, "created_at": t.created_at, "merchant": t.merchant, "amount": t.amount, "fee": t.fee or 0} for t in rows]}
+
+
+# ====================================================== conversations
+class ChatIn(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    run_id: int | None = None          # continue an employee thread
+    history: list[dict] | None = None  # assistant: prior turns from the client
+
+
+@router.post("/agents/{agent_id}/chat", response_model=RunOut, tags=["agents"])
+def agent_chat(agent_id: int, body: ChatIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.agents.chat import employee_chat
+    a = _agent(db, user, agent_id)
+    c = company_of(user, db)
+    run = db.get(AgentRun, body.run_id) if body.run_id else None
+    if run and (run.agent_id != a.id or run.company_id != c.id):
+        raise HTTPException(404, "Thread not found")
+    run = employee_chat(db, c, a, user, run, body.message)
+    return _run_out(db, run)
+
+
+@router.post("/assistant/chat", tags=["assistant"])
+def assistant(body: ChatIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.agents.chat import assistant_chat
+    return assistant_chat(db, company_of(user, db), user, body.history or [], body.message)

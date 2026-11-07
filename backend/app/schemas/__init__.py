@@ -155,6 +155,7 @@ class AgentOut(BaseModel):
     key_prefix: str
     last_active_at: UtcDatetime | None
     key_expires_at: UtcDatetime | None = None
+    card: dict | None = None   # {id, provider, last4, status, available_balance, credit_limit}
     created_at: UtcDatetime
 
 
@@ -234,6 +235,9 @@ class TransactionOut(BaseModel):
     merchant: str
     status: str
     decline_reason: str | None
+    fee: int = 0
+    fee_rate_bps: int = 0
+    agent_name: str | None = None
     created_at: UtcDatetime
 
 
@@ -269,6 +273,7 @@ class CardOut(BaseModel):
     status: str
     is_default: bool
     department_id: int | None
+    agent_id: int | None = None
     created_at: UtcDatetime
     model_config = {"from_attributes": True}
 

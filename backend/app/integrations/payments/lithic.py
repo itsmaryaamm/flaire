@@ -72,6 +72,13 @@ class LithicAdapter:
             r = c.patch(f"/cards/{card.provider_token}", json={"state": state})
             r.raise_for_status()
 
+    def set_spend_limit(self, card: Card, limit: int) -> None:
+        if not self.enabled or not card.provider_token:
+            return
+        with self._client() as c:
+            r = c.patch(f"/cards/{card.provider_token}", json={"spend_limit": limit, "spend_limit_duration": "MONTHLY"})
+            r.raise_for_status()
+
     # ---------------- payments ----------------
     def authorize(self, card: Card, amount: int, merchant: str, descriptor: str) -> PaymentResult:
         if not self.enabled:
