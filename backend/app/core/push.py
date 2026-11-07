@@ -41,10 +41,11 @@ def send_to_company_approvers(db: Session, company_id: int, title: str, body: st
     subs = (db.query(PushSubscription).join(User, User.id == PushSubscription.user_id)
             .filter(User.company_id == company_id, User.role.in_(["owner", "finance"])).all())
     sent, failed = 0, 0
+    errors: list[str] = []
     try:
         from pywebpush import WebPushException, webpush
     except ImportError:
-        return {"sent": 0, "failed": 0, "error": "pywebpush not installed"}
+        return {"sent": 0, "failed": 0, "subscriptions": 0, "errors": ["pywebpush not installed"]}
     for sub in subs:
         try:
             webpush(subscription_info={"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}},
@@ -54,9 +55,12 @@ def send_to_company_approvers(db: Session, company_id: int, title: str, body: st
         except WebPushException as exc:
             failed += 1
             status = getattr(getattr(exc, "response", None), "status_code", None)
+            errors.append(f"{status or 'push'}: {str(exc)[:120]}")
             if status in (404, 410):  # subscription gone
                 db.delete(sub)
-        except Exception:
+        except Exception as exc:
             failed += 1
+            errors.append(str(exc)[:160])
     db.flush()
-    return {"sent": sent, "failed": failed, "subscriptions": len(subs)}
+    return {"sent": sent, "failed": failed, "subscriptions": len(subs), "errors": errors[:3],
+            "devices": [{"ua": (s.user_agent or "")[:60], "since": s.created_at.isoformat()} for s in subs]}

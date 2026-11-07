@@ -56,6 +56,23 @@ export function NotifyCard() {
         {push.state === 'on' ? 'Turn off push on this phone' : 'Enable push on this phone'}
       </button>
       <div className="text-xs text-neutral-500 mt-2 px-1">{push.statusText}</div>
+      {push.state === 'on' && (
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              const { data } = await api.post<{ sent: number; failed: number; subscriptions: number; errors?: string[] }>('/push/test')
+              if (data.sent > 0) toast.success(`Test sent to ${data.sent} device(s). Check your notifications.`)
+              else toast.error(data.errors?.[0] ? `Push failed: ${data.errors[0]}` : `No device received it (${data.subscriptions} registered).`)
+            } catch (err) {
+              toast.error(errorMessage(err))
+            }
+          }}
+          className="mt-2 w-full h-11 rounded-pill text-sm font-semibold border border-line bg-white text-ink hover:bg-lavender"
+        >
+          Send a test notification
+        </button>
+      )}
 
       {push.needsInstall && (
         <div className="mt-3 flex items-start gap-2 rounded-input border border-line bg-lavender px-3 py-2.5 text-xs text-neutral-600">
