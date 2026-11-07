@@ -2,31 +2,27 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { MailCheck } from 'lucide-react'
-import { api, errorMessage } from '../lib/api'
+import { errorMessage } from '../lib/api'
+import { useAuth } from '../lib/auth'
+import type { ForgotResult } from '../lib/auth'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
 import { AuthShell } from './AuthShell'
 
-interface ForgotResponse {
-  ok: boolean
-  message: string
-  /** Only returned by a development backend, so the link can be opened without email. */
-  reset_link?: string
-}
-
 export default function ForgotPage() {
+  const { forgot } = useAuth()
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<ForgotResponse | null>(null)
+  const [result, setResult] = useState<ForgotResult | null>(null)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      const { data } = await api.post<ForgotResponse>('/auth/forgot', { email: email.trim() })
-      setResult(data)
+      // Builtin mode posts /auth/forgot; Supabase mode sends the reset email through Supabase.
+      setResult(await forgot(email.trim()))
     } catch (err) {
       setError(errorMessage(err))
     } finally {

@@ -6,19 +6,26 @@ import { errorMessage, isNetworkError, wakeServer } from '../lib/api'
 import axios from 'axios'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
+import { GoogleButton } from '../components/GoogleButton'
 import { AuthShell } from './AuthShell'
 
 export default function LoginPage() {
-  const { login } = useAuth()
+  const { login, provider } = useAuth()
   const navigate = useNavigate()
   const location = useLocation() as { state?: { from?: string } }
-  const [email, setEmail] = useState('demo@flaire.sa')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [needsCode, setNeedsCode] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [waking, setWaking] = useState<number | null>(null)
+  const builtin = provider === 'builtin'
+
+  // The demo account only exists on the built-in auth backend.
+  useEffect(() => {
+    if (builtin) setEmail((e) => e || 'demo@flaire.sa')
+  }, [builtin])
 
   // Warm the backend as soon as the page opens, so the first sign-in does not hit a sleeping server.
   useEffect(() => {
@@ -35,17 +42,19 @@ export default function LoginPage() {
     setError(null)
     const otp = needsCode ? code.trim() : undefined
     try {
+      let result: { needs_onboarding: boolean }
       try {
-        await login(email.trim(), password, otp)
+        result = await login(email.trim(), password, otp)
       } catch (err) {
         if (!isNetworkError(err)) throw err
         // Server was asleep: wake it, then try once more.
         const ok = await wakeServer((sec) => setWaking(sec))
         setWaking(null)
         if (!ok) throw err
-        await login(email.trim(), password, otp)
+        result = await login(email.trim(), password, otp)
       }
-      navigate(location.state?.from || '/', { replace: true })
+      if (result.needs_onboarding) navigate('/welcome', { replace: true })
+      else navigate(location.state?.from || '/', { replace: true })
     } catch (err) {
       const detail = axios.isAxiosError(err) ? (err.response?.data as { detail?: unknown } | undefined)?.detail : undefined
       if (detail === '2fa_required') {
@@ -121,22 +130,26 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <div className="mt-5 rounded-card border border-dashed border-line-strong bg-lavender px-3.5 py-3 text-xs text-neutral-600">
-        <div>
-          Demo account: <code className="font-mono text-ink">demo@flaire.sa</code> /{' '}
-          <code className="font-mono text-ink">demo1234</code>
+      {provider === 'supabase' && <GoogleButton />}
+
+      {builtin && (
+        <div className="mt-5 rounded-card border border-dashed border-line-strong bg-lavender px-3.5 py-3 text-xs text-neutral-600">
+          <div>
+            Demo account: <code className="font-mono text-ink">demo@flaire.sa</code> /{' '}
+            <code className="font-mono text-ink">demo1234</code>
+          </div>
+          <button
+            type="button"
+            className="text-brand font-semibold mt-1 hover:underline"
+            onClick={() => {
+              setEmail('demo@flaire.sa')
+              setPassword('demo1234')
+            }}
+          >
+            Fill demo credentials
+          </button>
         </div>
-        <button
-          type="button"
-          className="text-brand font-semibold mt-1 hover:underline"
-          onClick={() => {
-            setEmail('demo@flaire.sa')
-            setPassword('demo1234')
-          }}
-        >
-          Fill demo credentials
-        </button>
-      </div>
+      )}
 
       <p className="text-sm text-neutral-500 mt-6">
         New here?{' '}

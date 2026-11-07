@@ -15,6 +15,7 @@ import TransactionsPage from './pages/TransactionsPage'
 import CardsPage from './pages/CardsPage'
 import SettingsPage from './pages/SettingsPage'
 import MobileApp from './pages/MobileApp'
+import WelcomePage from './pages/WelcomePage'
 import { isNarrowViewport, prefersFullDashboard } from './lib/prefs'
 
 /**
@@ -28,18 +29,20 @@ function HomeGate() {
   return <DashboardPage />
 }
 
+/** Needs a session. Users without a company are sent to the walkthrough; /welcome itself never needs a company. */
 function RequireAuth() {
-  const { isAuthenticated, loading } = useAuth()
+  const { isAuthenticated, needsOnboarding, loading } = useAuth()
   const location = useLocation()
   if (loading) return <PageLoader />
   if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (needsOnboarding && location.pathname !== '/welcome') return <Navigate to="/welcome" replace />
   return <Outlet />
 }
 
 function PublicOnly() {
-  const { isAuthenticated, loading } = useAuth()
+  const { isAuthenticated, needsOnboarding, loading } = useAuth()
   if (loading) return <PageLoader />
-  if (isAuthenticated) return <Navigate to="/" replace />
+  if (isAuthenticated) return <Navigate to={needsOnboarding ? '/welcome' : '/'} replace />
   return <Outlet />
 }
 
@@ -50,9 +53,11 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot" element={<ForgotPage />} />
-        <Route path="/reset" element={<ResetPage />} />
       </Route>
+      {/* Not PublicOnly: in Supabase mode the recovery link signs the user in before they choose a password. */}
+      <Route path="/reset" element={<ResetPage />} />
       <Route element={<RequireAuth />}>
+        <Route path="/welcome" element={<WelcomePage />} />
         <Route path="/m" element={<MobileApp />} />
         <Route element={<Layout />}>
           <Route path="/" element={<HomeGate />} />

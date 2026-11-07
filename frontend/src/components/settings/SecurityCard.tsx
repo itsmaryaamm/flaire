@@ -25,8 +25,9 @@ function onlyDigits(v: string): string {
 
 /** Settings card: change password, two-factor authentication, and the company-wide 2FA policy for approvers. */
 export function SecurityCard() {
-  const { user, company, refresh, setCompany } = useAuth()
+  const { user, company, refresh, setCompany, provider } = useAuth()
   const toast = useToast()
+  const supabaseMode = provider === 'supabase'
   const canSetPolicy = !!user?.role && APPROVER_ROLES.includes(user.role)
 
   // ---- Change password ----
@@ -144,14 +145,19 @@ export function SecurityCard() {
   const enabled = user?.totp_enabled ?? false
 
   return (
-    <section className="card-lg p-5">
+    <section id="security" className="card-lg p-5 scroll-mt-20">
       <div className="flex items-center gap-2">
         <KeyRound className="h-4 w-4 text-brand" />
         <h3 className="font-bold">Security</h3>
       </div>
       <p className="text-xs text-neutral-500 mt-0.5 mb-4">Your password and second factor. Approvals are only as safe as the account that makes them.</p>
 
-      {/* Change password */}
+      {/* Change password (builtin auth only; Supabase manages credentials itself) */}
+      {supabaseMode ? (
+        <p className="rounded-input border border-line bg-lavender px-3 py-2 text-xs text-neutral-600">
+          Password and email are managed by your sign-in. Use Forgot password on the sign-in page to change it.
+        </p>
+      ) : (
       <form onSubmit={changePassword} className="space-y-3">
         <h4 className="text-sm font-semibold">Change password</h4>
         <div>
@@ -202,6 +208,7 @@ export function SecurityCard() {
           </button>
         </div>
       </form>
+      )}
 
       <hr className="border-line my-5" />
 

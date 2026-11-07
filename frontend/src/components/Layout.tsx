@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   Bot,
@@ -11,6 +11,7 @@ import {
   Menu,
   X,
   Smartphone,
+  LifeBuoy,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useAuth } from '../lib/auth'
@@ -78,8 +79,8 @@ export function Layout() {
   const pendingCount = summary.data?.totals.pending_count ?? 0
   const agentCount = summary.data?.agents?.filter((a) => a.status === 'active').length ?? summary.data?.totals.agent_count ?? 0
 
-  const doLogout = () => {
-    logout()
+  const doLogout = async () => {
+    await logout()
     navigate('/login')
   }
 
@@ -112,8 +113,11 @@ export function Layout() {
             <ConnectedAgents count={agentCount} />
             <div className="mt-4 pt-4 border-t border-line">
               <div className="text-sm font-semibold truncate">{company?.name}</div>
-              <div className="text-xs text-neutral-500 truncate">{user?.email}</div>
-              <button onClick={doLogout} className="btn-ghost mt-1.5 w-full justify-start px-2 text-xs">
+              <div className="text-xs text-neutral-500 truncate" title={user?.email}>{user?.email}</div>
+              <Link to="/welcome" className="btn-ghost mt-1.5 w-full justify-start px-2 text-xs">
+                <LifeBuoy className="h-3.5 w-3.5" /> Help: restart walkthrough
+              </Link>
+              <button onClick={doLogout} className="btn-ghost w-full justify-start px-2 text-xs">
                 <LogOut className="h-3.5 w-3.5" /> Sign out
               </button>
             </div>
@@ -159,6 +163,9 @@ export function Layout() {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold truncate">{company?.name}</div>
                     <div className="text-xs text-neutral-500 truncate">{user?.email}</div>
+                    <Link to="/welcome" className="text-xs text-brand font-semibold hover:underline" onClick={() => setMenuOpen(false)}>
+                      Help: restart walkthrough
+                    </Link>
                   </div>
                   <button onClick={doLogout} className="btn-secondary text-xs">
                     <LogOut className="h-3.5 w-3.5" /> Sign out

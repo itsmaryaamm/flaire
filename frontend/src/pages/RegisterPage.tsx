@@ -1,18 +1,62 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { MailCheck } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { errorMessage } from '../lib/api'
+import { getSupabase, supabaseErrorMessage } from '../lib/supabase'
+import { useToast } from '../lib/toast'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
+import { GoogleButton } from '../components/GoogleButton'
 import { AuthShell } from './AuthShell'
 
+function CheckEmail({ email }: { email: string }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+
+  const resend = async () => {
+    const sb = getSupabase()
+    if (!sb) return
+    setBusy(true)
+    try {
+      const { error } = await sb.auth.resend({ type: 'signup', email })
+      if (error) throw error
+      toast.success('Confirmation email sent again.')
+    } catch (err) {
+      toast.error(supabaseErrorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <AuthShell title="Check your email" subtitle="One more step before your company exists.">
+      <div className="flex items-start gap-3 rounded-card border border-line bg-success-tint px-3.5 py-3 text-sm text-success">
+        <MailCheck className="h-4 w-4 mt-0.5 shrink-0" />
+        <span>
+          We sent a confirmation link to <strong>{email}</strong>. Open it to finish creating your account.
+        </span>
+      </div>
+      <p className="text-xs text-neutral-500 mt-4">Nothing in your inbox after a minute? Check spam, or send it again.</p>
+      <button type="button" className="btn-secondary w-full mt-3" onClick={resend} disabled={busy}>
+        {busy && <Spinner />} Resend confirmation email
+      </button>
+      <p className="text-sm text-neutral-500 mt-6">
+        Already confirmed?{' '}
+        <Link to="/login" className="text-brand font-semibold hover:underline">Sign in</Link>
+      </p>
+    </AuthShell>
+  )
+}
+
 export default function RegisterPage() {
-  const { register } = useAuth()
+  const { register, provider } = useAuth()
   const navigate = useNavigate()
   const [form, setForm] = useState({ company_name: '', full_name: '', email: '', password: '' })
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [confirmEmail, setConfirmEmail] = useState<string | null>(null)
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }))
@@ -22,14 +66,21 @@ export default function RegisterPage() {
     setBusy(true)
     setError(null)
     try {
-      await register({ ...form, email: form.email.trim() })
-      navigate('/', { replace: true })
+      const result = await register({ ...form, email: form.email.trim() })
+      if (result.status === 'confirm_email') {
+        setConfirmEmail(result.email)
+      } else {
+        // New accounts always start with the walkthrough (it skips the company step when one exists).
+        navigate('/welcome', { replace: true })
+      }
     } catch (err) {
       setError(errorMessage(err))
     } finally {
       setBusy(false)
     }
   }
+
+  if (confirmEmail) return <CheckEmail email={confirmEmail} />
 
   return (
     <AuthShell title="Create your company" subtitle="Takes thirty seconds. You can add AI employees right after.">
@@ -56,6 +107,7 @@ export default function RegisterPage() {
           {busy && <Spinner />} Create company
         </button>
       </form>
+      {provider === 'supabase' && <GoogleButton />}
       <p className="text-sm text-neutral-500 mt-6">
         Already have an account?{' '}
         <Link to="/login" className="text-brand font-semibold hover:underline">Sign in</Link>

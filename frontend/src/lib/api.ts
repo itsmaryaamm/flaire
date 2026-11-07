@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios'
 import type { ApiError } from '../types'
+import { clearSupabaseToken, getSupabase, getSupabaseAccessToken, isSupabaseMode } from './supabase'
 
 export const API_URL: string =
   (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8000/api/v1'
@@ -29,8 +30,9 @@ export const api = axios.create({
   timeout: 60_000,
 })
 
-api.interceptors.request.use((config) => {
-  const token = getToken()
+api.interceptors.request.use(async (config) => {
+  // Supabase mode: the Supabase session access token is the Bearer token. Builtin mode: the stored Flaire token.
+  const token = isSupabaseMode() ? await getSupabaseAccessToken() : getToken()
   if (token) {
     config.headers = config.headers ?? {}
     config.headers.Authorization = `Bearer ${token}`
@@ -40,11 +42,27 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (res) => res,
-  (error: AxiosError<ApiError>) => {
-    if (error.response?.status === 401) {
-      setToken(null)
+  async (error: AxiosError<ApiError>) => {
+    const status = error.response?.status
+    const detail = (error.response?.data as { detail?: unknown } | undefined)?.detail
+    if (status === 401) {
+      if (isSupabaseMode()) {
+        clearSupabaseToken()
+        try {
+          await getSupabase()?.auth.signOut()
+        } catch {
+          // already signed out
+        }
+      } else {
+        setToken(null)
+      }
       if (!window.location.pathname.startsWith('/login')) {
         window.location.assign('/login')
+      }
+    } else if (status === 403 && detail === 'onboarding_required') {
+      // Signed in but no company yet: send them to the walkthrough, this is not a logout.
+      if (!window.location.pathname.startsWith('/welcome')) {
+        window.location.assign('/welcome')
       }
     }
     return Promise.reject(error)

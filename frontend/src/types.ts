@@ -29,6 +29,8 @@ export interface Company {
   lithic_configured: boolean
   /** When true, owners and finance users without 2FA cannot approve or reject until they enable it. */
   require_2fa_for_approvers: boolean
+  /** True once the owner finished or dismissed the welcome walkthrough. */
+  onboarding_done?: boolean
   created_at: string
 }
 
@@ -56,6 +58,36 @@ export interface AuthResponse {
   token_type: string
   user: User
   company: Company
+}
+
+/** GET /auth/config (public): which sign-in system the backend uses. */
+export interface AuthConfig {
+  provider: 'supabase' | 'builtin'
+  supabase_url?: string | null
+  supabase_anon_key?: string | null
+}
+
+/** GET /auth/me */
+export interface MeResponse {
+  user: User
+  company: Company | null
+  needs_onboarding: boolean
+}
+
+/** GET /onboarding/status */
+export interface OnboardingStatus {
+  has_company: boolean
+  onboarding_done: boolean
+  steps: {
+    company: boolean
+    department: boolean
+    card: boolean
+    agent: boolean
+    claude_connected: boolean
+    first_request: boolean
+    two_factor: boolean
+  }
+  complete: boolean
 }
 
 export interface Department {

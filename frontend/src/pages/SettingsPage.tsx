@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { ShieldCheck, ShieldAlert, Cpu, Link2, ScrollText, Bot, User, Server } from 'lucide-react'
 import { api, errorMessage } from '../lib/api'
 import { useAuth } from '../lib/auth'
@@ -13,6 +14,7 @@ import { ConnectClaudeCard } from '../components/settings/ConnectClaudeCard'
 import { PaymentsCard } from '../components/settings/PaymentsCard'
 import { NotifyThresholdCard } from '../components/settings/NotifyThresholdCard'
 import { SecurityCard } from '../components/settings/SecurityCard'
+import { DangerZoneCard } from '../components/settings/DangerZoneCard'
 import { ErrorNote } from '../components/ErrorNote'
 import { PageLoader, Spinner } from '../components/Spinner'
 import { EmptyState } from '../components/EmptyState'
@@ -63,6 +65,15 @@ function ActorIcon({ type }: { type: AuditEntry['actor_type'] }) {
 export default function SettingsPage() {
   const { company, setCompany } = useAuth()
   const toast = useToast()
+  const location = useLocation()
+
+  // Deep links like /settings#connect or /settings#security scroll to that card.
+  useEffect(() => {
+    const id = location.hash.replace('#', '')
+    if (!id) return
+    const t = window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
+    return () => window.clearTimeout(t)
+  }, [location.hash])
   const [name, setName] = useState(company?.name ?? '')
   const [savingName, setSavingName] = useState(false)
   const [savingEngine, setSavingEngine] = useState(false)
@@ -162,6 +173,12 @@ export default function SettingsPage() {
               <dd className="font-semibold">{formatDate(company?.created_at, false)}</dd>
             </div>
           </dl>
+          <div className="mt-4 pt-3 border-t border-line text-xs text-neutral-500">
+            Need a refresher?{' '}
+            <Link to="/welcome" className="text-brand font-semibold hover:underline">
+              Restart the walkthrough
+            </Link>
+          </div>
         </section>
 
         <SecurityCard />
@@ -350,6 +367,8 @@ export default function SettingsPage() {
           </div>
         )}
       </section>
+
+      <DangerZoneCard />
     </div>
   )
 }

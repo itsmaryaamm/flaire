@@ -32,7 +32,7 @@ export function ConnectClaudeCard() {
   const list = connections.data ?? []
 
   return (
-    <section className="card-lg p-5 lg:col-span-2">
+    <section id="connect" className="card-lg p-5 lg:col-span-2 scroll-mt-20">
       <div className="flex items-center gap-2">
         <Plug className="h-4 w-4 text-brand" />
         <h3 className="font-bold">Connect your Claude</h3>

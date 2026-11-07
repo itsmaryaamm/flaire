@@ -36,9 +36,9 @@ export function MobileHeader({ onRefresh, refreshing }: { onRefresh: () => void;
     navigate('/?full=1')
   }
 
-  const signOut = () => {
+  const signOut = async () => {
     setOpen(false)
-    logout()
+    await logout()
     navigate('/login')
   }
 

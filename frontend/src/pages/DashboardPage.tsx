@@ -12,6 +12,7 @@ import { ErrorNote } from '../components/ErrorNote'
 import { KillSwitchButton } from '../components/KillSwitchPanel'
 import { PageHeader } from '../components/PageHeader'
 import { DashboardKpis } from '../components/dashboard/DashboardKpis'
+import { GettingStartedCard } from '../components/dashboard/GettingStartedCard'
 import { PendingList } from '../components/dashboard/PendingList'
 import { RecentActivity } from '../components/dashboard/RecentActivity'
 import { RequestDetail } from '../components/dashboard/RequestDetail'
@@ -92,6 +93,8 @@ export default function DashboardPage() {
           </>
         }
       />
+
+      <GettingStartedCard />
 
       <DashboardKpis data={data} />
 
