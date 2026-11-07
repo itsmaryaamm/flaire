@@ -12,6 +12,8 @@ Principle: the AI explains and requests. The server decides. Money moves only on
 | Agent keys cannot reach any human endpoint (approvals, limits, cards, kill switch) | security.get_current_user vs get_current_agent | test_agent_key_cannot_reach_human_routes |
 | Rate limit 60/min per agent key on /agent/* and /mcp/*; 10 logins per 15 min per IP | core/guard.py | test_bad_key_lockout_and_rate_limit |
 | Bad-key lockout: 8 wrong keys from one IP locks it for 15 min | core/guard.py | same |
+| Two-factor authentication (TOTP) per user; company policy can require it for all approvers; connector sign-in and login both enforce it | api/auth_extra.py, api/oauth.py | test_password_reset_change_and_2fa |
+| Password reset by emailed single-use token (1 h, hashed); reset revokes every connected Claude for that user | api/auth_extra.py | test_password_reset_change_and_2fa |
 | Password re-entry on every approve/reject | services.resolve_approval | test_needs_approval_then_approve |
 | Two-person rule at/above company threshold (default SAR 2,500), different humans only | services.resolve_approval | test_two_person_rule |
 | Rules re-evaluated at approval time (budget, kill switch) | engine.approve | test_kill_switch |
@@ -34,9 +36,19 @@ A connector link is a credential. Treat it like a password: one link per recipie
 person or system), set an expiry when you create it, never paste it in public documents or screenshots, rotate
 to revoke. Everyone using a link acts within that agent's limits and nothing more.
 
+## Recommended setup for a company
+
+1. One Flaire company per business. Owners and finance approve; everyone else is a viewer.
+2. Every person connects their own Claude with **Sign in now** and **Use Claude's published identity**. No shared links. The ledger then shows which person's Claude did what.
+3. Settings → Security: turn on **Require 2FA for everyone who can approve**.
+4. Keep the two-person rule for large amounts, department budgets, and the notification threshold tuned to what matters.
+5. Revoke a connection the moment someone leaves (Settings → Connected Claudes). Changing a password also revokes that person's connections.
+
+Roadmap for enterprise: SSO (Google Workspace, Microsoft Entra) via OIDC, SCIM user provisioning, MFA to lift the kill switch, IP allowlists.
+
 ## Not implemented (production list)
 
-- MFA for dashboard users and MFA to lift the kill switch
+- SSO / SCIM; MFA to lift the kill switch
 - Field-level encryption and backup/restore drills
 - Anomaly alerting (denied-request spikes, new merchants, approval bursts) and admin notifications
 - Full Lithic lifecycle reconciliation (refunds, disputes, force-post clearing) and daily reconciliation jobs

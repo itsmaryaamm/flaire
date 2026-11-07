@@ -57,6 +57,12 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == body.email.lower()).first()
     if not user or not verify_password(body.password, user.password_hash):
         raise HTTPException(401, "Invalid email or password")
+    if user.totp_enabled:
+        from app.api.auth_extra import totp_ok
+        if not body.code:
+            raise HTTPException(401, "2fa_required")
+        if not totp_ok(user, body.code):
+            raise HTTPException(401, "Invalid authentication code")
     company = company_of(user, db)
     return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=company_out(company))
 
@@ -80,7 +86,9 @@ def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db
     if body.engine:
         c.engine = body.engine
         audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="engine.changed", details={"engine": body.engine})
-    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from", "notify_threshold")}
+    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from", "notify_threshold", "require_2fa_for_approvers")}
+    if sec.get("require_2fa_for_approvers") and not user.totp_enabled:
+        raise HTTPException(409, "Enable 2FA on your own account first, otherwise you would lock yourself out of approvals.")
     if body.lithic_api_key is not None:
         from app.core.crypto import encrypt
         c.lithic_api_key_enc = encrypt(body.lithic_api_key.strip()) if body.lithic_api_key.strip() else None
@@ -305,13 +313,20 @@ def list_approvals(user: User = Depends(get_current_user), db: Session = Depends
     return [purchase_out(p) for p in q.order_by(PurchaseRequest.id.asc()).all()]
 
 
+def _require_2fa_policy(user: User, company: Company) -> None:
+    if company.require_2fa_for_approvers and not user.totp_enabled:
+        raise HTTPException(403, "Your company requires two-factor authentication for approvers. Enable it in Settings → Security.")
+
+
 @router.post("/approvals/{pr_id}/approve", response_model=PurchaseRequestOut, tags=["approvals"])
 def approve(pr_id: int, body: ApprovalIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    _require_2fa_policy(user, company_of(user, db))
     return purchase_out(resolve_approval(db, company_of(user, db), user, _pr(db, user, pr_id), True, body.note, body.password))
 
 
 @router.post("/approvals/{pr_id}/reject", response_model=PurchaseRequestOut, tags=["approvals"])
 def reject(pr_id: int, body: ApprovalIn, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    _require_2fa_policy(user, company_of(user, db))
     return purchase_out(resolve_approval(db, company_of(user, db), user, _pr(db, user, pr_id), False, body.note, body.password))
 
 

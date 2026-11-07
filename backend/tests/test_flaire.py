@@ -409,3 +409,40 @@ def test_company_lithic_key_and_notify_threshold(ctx):
     assert after == before
     c = client.patch("/api/v1/company", json={"lithic_api_key": "", "notify_threshold": 0}, headers=H).json()
     assert c["lithic_configured"] is False
+
+
+def test_password_reset_change_and_2fa(ctx):
+    import pyotp
+    from app.core import guard
+    guard.reset()
+    H = ctx["H"]
+    # forgot: unknown email still 200; known email returns link in non-prod
+    assert client.post("/api/v1/auth/forgot", json={"email": "nobody@test.sa"}).json()["ok"]
+    r = client.post("/api/v1/auth/forgot", json={"email": "owner@test.sa"}).json()
+    token = r["reset_link"].split("token=")[1]
+    assert client.post("/api/v1/auth/reset", json={"token": "bad", "password": "newpassword1"}).status_code == 400
+    assert client.post("/api/v1/auth/reset", json={"token": token, "password": "newpassword1"}).json()["ok"]
+    assert client.post("/api/v1/auth/reset", json={"token": token, "password": "again12345"}).status_code == 400  # single use
+    assert client.post("/api/v1/auth/login", json={"email": "owner@test.sa", "password": "password123"}).status_code == 401
+    tok = client.post("/api/v1/auth/login", json={"email": "owner@test.sa", "password": "newpassword1"}).json()["access_token"]
+    H2 = {"Authorization": f"Bearer {tok}"}
+    # change back
+    assert client.post("/api/v1/auth/change-password", json={"current_password": "wrong", "new_password": "password123"}, headers=H2).status_code == 403
+    assert client.post("/api/v1/auth/change-password", json={"current_password": "newpassword1", "new_password": "password123"}, headers=H2).json()["ok"]
+    # 2FA
+    setup = client.post("/api/v1/auth/2fa/setup", headers=H).json()
+    assert setup["qr_svg"].startswith("data:image/svg+xml")
+    assert client.post("/api/v1/auth/2fa/enable", json={"code": "000000"}, headers=H).status_code == 400
+    code = pyotp.TOTP(setup["secret"]).now()
+    assert client.post("/api/v1/auth/2fa/enable", json={"code": code}, headers=H).json()["enabled"]
+    assert client.post("/api/v1/auth/login", json={"email": "owner@test.sa", "password": "password123"}).json()["detail"] == "2fa_required"
+    assert client.post("/api/v1/auth/login", json={"email": "owner@test.sa", "password": "password123", "code": pyotp.TOTP(setup["secret"]).now()}).status_code == 200
+    # company policy: require 2FA for approvers blocks a user without it
+    assert client.patch("/api/v1/company", json={"require_2fa_for_approvers": True}, headers=H).json()["require_2fa_for_approvers"] is True
+    tok2 = client.post("/api/v1/auth/login", json={"email": "finance@test.sa", "password": "password123"}).json()["access_token"]
+    pr = buy(ctx, 150_000, merchant="Snapchat Ads")
+    assert pr["status"] == "pending_approval"
+    r = client.post(f"/api/v1/approvals/{pr['id']}/approve", json={"password": "password123"}, headers={"Authorization": f"Bearer {tok2}"})
+    assert r.status_code == 403 and "two-factor" in r.json()["detail"]
+    client.patch("/api/v1/company", json={"require_2fa_for_approvers": False}, headers=H)
+    assert client.post("/api/v1/auth/2fa/disable", json={"password": "password123", "code": pyotp.TOTP(setup["secret"]).now()}, headers=H).json()["enabled"] is False

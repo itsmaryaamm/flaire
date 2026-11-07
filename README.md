@@ -127,6 +127,7 @@ docs/API.md                        API contract
 
 **Security model** (full table in `docs/SECURITY.md`)
 - Connector sign-in is OAuth 2.1 with PKCE; tokens hashed, agent-bound, 90-day expiry, revocable.
+- Accounts: forgot/reset password by email, change password, two-factor authentication (TOTP), and a company policy to require 2FA for approvers.
 - Humans use JWT. Agents use `X-Agent-Key` (stored hashed, shown once, rotatable). Agent keys only work on `/agent/*` routes: there is no endpoint an agent can call to approve, change a limit, or touch a card.
 - The engine fails closed. A sidecar outage, a malformed policy or an internal error is a denial.
 - Payment needs a signed receipt bound to agent + merchant + amount with a 5-minute TTL. A tampered or replayed receipt is rejected before any adapter is called.

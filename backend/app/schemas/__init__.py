@@ -26,6 +26,7 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     email: EmailStr
     password: str
+    code: str | None = None   # 2FA code when enabled
 
 
 class UserOut(BaseModel):
@@ -33,6 +34,7 @@ class UserOut(BaseModel):
     email: str
     full_name: str
     role: str
+    totp_enabled: bool = False
     model_config = {"from_attributes": True}
 
 
@@ -49,6 +51,7 @@ class CompanyOut(BaseModel):
     new_merchant_review_from: int = 20_000
     notify_threshold: int = 0
     lithic_configured: bool = False
+    require_2fa_for_approvers: bool = False
     created_at: UtcDatetime
     model_config = {"from_attributes": True}
 
@@ -69,6 +72,7 @@ class CompanyPatch(BaseModel):
     new_merchant_review_from: int | None = Field(default=None, ge=0)
     notify_threshold: int | None = Field(default=None, ge=0)
     lithic_api_key: str | None = None   # write-only; empty string removes
+    require_2fa_for_approvers: bool | None = None
 
     @field_validator("engine")
     @classmethod

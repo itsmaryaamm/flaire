@@ -46,7 +46,8 @@ def init_db() -> None:
 _NEW_COLUMNS = {
     "companies": [("require_password_on_approve", "BOOLEAN DEFAULT 1"), ("two_person_threshold", "INTEGER DEFAULT 250000"), ("kill_switch_frozen_cards", "JSON NULL"),
                   ("trusted_merchants", "JSON NULL"), ("new_merchant_review_from", "INTEGER DEFAULT 20000"),
-                  ("notify_threshold", "INTEGER DEFAULT 0"), ("lithic_api_key_enc", "TEXT NULL")],
+                  ("notify_threshold", "INTEGER DEFAULT 0"), ("lithic_api_key_enc", "TEXT NULL"), ("require_2fa_for_approvers", "BOOLEAN DEFAULT 0")],
+    "users": [("totp_secret_enc", "TEXT NULL"), ("totp_enabled", "BOOLEAN DEFAULT 0")],
     "agents": [("key_expires_at", "TIMESTAMP NULL")],
     "departments": [("spending_paused", "BOOLEAN DEFAULT 0")],
 }

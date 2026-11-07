@@ -30,6 +30,7 @@ class Company(Base):
     new_merchant_review_from: Mapped[int] = mapped_column(Integer, default=20_000)  # halalas; 0 disables new-merchant review
     notify_threshold: Mapped[int] = mapped_column(Integer, default=0)  # halalas; push/email approvers only for holds at/above this
     lithic_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted, entered in Settings → Payments
+    require_2fa_for_approvers: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     users: Mapped[list[User]] = relationship(back_populates="company")
@@ -45,6 +46,8 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(String(200))
     role: Mapped[str] = mapped_column(String(30), default="owner")  # owner | finance | viewer
+    totp_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     company: Mapped[Company] = relationship(back_populates="users")
@@ -253,4 +256,14 @@ class OAuthToken(Base):
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PasswordReset(Base):
+    __tablename__ = "password_resets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

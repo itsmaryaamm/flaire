@@ -140,6 +140,8 @@ button{{margin-top:22px;width:100%;padding:13px;border:0;border-radius:999px;bac
 {error}
 <label>Email</label><input name="email" type="email" required autocomplete="email" value="{email}">
 <label>Password</label><input name="password" type="password" required autocomplete="current-password">
+<p class="small"><a href="{forgot}" style="color:var(--v)">Forgot password?</a></p>
+<label>Authentication code <span style="font-weight:400;color:var(--mut)">(only if you use 2FA)</span></label><input name="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123 456">
 <label>This Claude will act as</label>
 <select name="agent"><option value="__new__">A new AI employee named "My Claude"</option>{agents}</select>
 <p class="small">Pick an existing AI employee to reuse its limits, or create a new one (default limits: SAR 1,000 per purchase, SAR 5,000 per month, human approval above SAR 500). You can change everything in the dashboard.</p>
@@ -150,12 +152,13 @@ button{{margin-top:22px;width:100%;padding:13px;border:0;border-radius:999px;bac
 
 
 def _render(client_name: str, params: dict, error: str = "", email: str = "", agents: list[Agent] | None = None) -> HTMLResponse:
+    forgot = f"{get_settings().dashboard_url.rstrip('/')}/forgot"
     opts = "".join(f'<option value="{a.id}">{html.escape(a.name)} ({html.escape(a.department.name if a.department else "")})</option>' for a in (agents or []))
     return HTMLResponse(PAGE.format(client=html.escape(client_name), error=f'<div class="err">{html.escape(error)}</div>' if error else "", email=html.escape(email),
                                     agents=opts, client_id=html.escape(params.get("client_id", "")), redirect_uri=html.escape(params.get("redirect_uri", "")),
                                     state=html.escape(params.get("state", "")), code_challenge=html.escape(params.get("code_challenge", "")),
                                     ccm=html.escape(params.get("code_challenge_method", "S256")), scope=html.escape(params.get("scope", "purchases")),
-                                    resource=html.escape(params.get("resource", ""))))
+                                    resource=html.escape(params.get("resource", "")), forgot=html.escape(forgot)))
 
 
 def _client_name(db: Session, client_id: str) -> str:
@@ -180,7 +183,7 @@ def authorize_page(request: Request, db: Session = Depends(get_db)):
 
 
 @router.post("/oauth/authorize", tags=["oauth"], include_in_schema=False)
-def authorize_submit(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...), agent: str = Form("__new__"),
+def authorize_submit(request: Request, db: Session = Depends(get_db), email: str = Form(...), password: str = Form(...), code: str = Form(""), agent: str = Form("__new__"),
                      client_id: str = Form(...), redirect_uri: str = Form(...), state: str = Form(""), code_challenge: str = Form(...),
                      code_challenge_method: str = Form("S256"), scope: str = Form("purchases"), resource: str = Form("")):
     params = {"client_id": client_id, "redirect_uri": redirect_uri, "state": state, "code_challenge": code_challenge, "code_challenge_method": code_challenge_method, "scope": scope, "resource": resource}
@@ -191,6 +194,9 @@ def authorize_submit(request: Request, db: Session = Depends(get_db), email: str
     user = db.query(User).filter(User.email == email.lower().strip()).first()
     if not user or not verify_password(password, user.password_hash):
         return _render(_client_name(db, client_id), params, "Wrong email or password.", email)
+    from app.api.auth_extra import totp_ok
+    if user.totp_enabled and not totp_ok(user, code):
+        return _render(_client_name(db, client_id), params, "Enter the 6-digit code from your authenticator app.", email)
     if user.role not in ("owner", "finance"):
         return _render(_client_name(db, client_id), params, "Only owners and finance users can connect an AI employee.", email)
     company = db.get(Company, user.company_id)
