@@ -154,8 +154,9 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
         pr.status = "completed"
         dept.spent_this_period += pr.amount
         agent.spent_this_period += pr.amount
-        audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.settled",
-                     details={"request_id": pr.id, "transaction_id": tx.id, "card": f"{card.label} {card.last4}", "amount": pr.amount, "provider_ref": result.provider_ref})
+        audit.record(db, company.id, actor_type="system", actor_id=None, actor_name="payment-service", event="payment.settled" if result.status == "settled" else "payment.authorized",
+                     details={"request_id": pr.id, "transaction_id": tx.id, "card": f"{card.label} {card.last4}", "amount": pr.amount, "provider_ref": result.provider_ref,
+                              "clearing_error": (result.raw or {}).get("clearing_error") if isinstance(result.raw, dict) else None})
     else:
         pr.status = "failed"
         pr.decision = {**pr.decision, "payment_error": result.decline_reason}

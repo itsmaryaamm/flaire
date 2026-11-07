@@ -1,6 +1,7 @@
 import { Fragment, useState } from 'react'
 import { ChevronDown, ChevronRight, ArrowLeftRight, ShieldCheck } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, errorMessage } from '../lib/api'
+import { useToast } from '../lib/toast'
 import { useFetch, formatDate } from '../lib/useFetch'
 import type { Agent, PurchaseRequest, PurchaseStatus, Transaction } from '../types'
 import { PageHeader } from '../components/PageHeader'
@@ -125,8 +126,22 @@ function RequestsTab() {
 }
 
 function TransactionsTab() {
+  const toast = useToast()
   const txs = useFetch(() => api.get<Transaction[]>('/transactions', { params: { limit: 200 } }).then((r) => r.data), [])
   const list = txs.data ?? []
+  const [settling, setSettling] = useState<number | null>(null)
+  const settle = async (id: number) => {
+    setSettling(id)
+    try {
+      await api.post(`/transactions/${id}/settle`)
+      toast.success('Settled with the card provider.')
+      await txs.refetch()
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setSettling(null)
+    }
+  }
   if (txs.loading && !txs.data) return <PageLoader />
   if (txs.error && !txs.data) return <ErrorNote message={txs.error} />
   if (list.length === 0)
@@ -166,6 +181,11 @@ function TransactionsTab() {
                 </td>
                 <td className="td">
                   <StatusPill status={t.status} />
+                  {t.status === 'authorized' && (
+                    <button className="btn-ghost text-xs ml-2" onClick={() => settle(t.id)} disabled={settling === t.id}>
+                      {settling === t.id ? 'Settling' : 'Settle now'}
+                    </button>
+                  )}
                   {t.decline_reason && <div className="text-xs text-danger mt-1">{t.decline_reason}</div>}
                 </td>
                 <td className="td">

@@ -90,15 +90,33 @@ class LithicAdapter:
             auth_token = data.get("token", "")
             if not auth_token:
                 return PaymentResult(False, "declined", "lithic_no_token", "Lithic did not return an authorization token", raw=data)
-            cr = c.post("/simulate/clearing", json={"token": auth_token, "amount": amount})
-            settled = cr.status_code < 400
+            settled, clearing_error = self._clear(c, auth_token, amount)
         card.available_balance = max(card.available_balance - amount, 0)
-        return PaymentResult(True, "settled" if settled else "authorized", auth_token, raw=data)
+        raw = {**data, "clearing_error": clearing_error} if clearing_error else data
+        return PaymentResult(True, "settled" if settled else "authorized", auth_token, raw=raw)
+
+    def _clear(self, c: httpx.Client, auth_token: str, amount: int) -> tuple[bool, str | None]:
+        """Simulate clearing with retries: the sandbox sometimes needs a moment after the authorization exists."""
+        import time
+        last = None
+        for delay in (0.0, 0.8, 2.0, 4.0):
+            if delay:
+                time.sleep(delay)
+            cr = c.post("/simulate/clearing", json={"token": auth_token, "amount": amount})
+            if cr.status_code < 400:
+                return True, None
+            try:
+                last = f"{cr.status_code}: {cr.json().get('message') or cr.text[:200]}"
+            except Exception:
+                last = f"{cr.status_code}: {cr.text[:200]}"
+        return False, last
 
     def settle(self, card: Card, provider_ref: str, amount: int) -> PaymentResult:
+        if not self.enabled:
+            return PaymentResult(False, "authorized", provider_ref, "No Lithic key configured")
         with self._client() as c:
-            r = c.post("/simulate/clearing", json={"token": provider_ref, "amount": amount})
-            return PaymentResult(r.status_code < 400, "settled" if r.status_code < 400 else "authorized", provider_ref)
+            ok, err = self._clear(c, provider_ref, amount)
+        return PaymentResult(ok, "settled" if ok else "authorized", provider_ref, None if ok else err)
 
     def balance(self, card: Card) -> int:
         return card.available_balance

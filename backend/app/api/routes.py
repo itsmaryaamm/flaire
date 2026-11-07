@@ -362,6 +362,27 @@ def get_transaction(tx_id: int, user: User = Depends(get_current_user), db: Sess
     return transaction_out(t)
 
 
+@router.post("/transactions/{tx_id}/settle", response_model=TransactionOut, tags=["transactions"])
+def settle_transaction(tx_id: int, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    """Retry clearing for an authorization that did not settle (Lithic sandbox)."""
+    t = db.get(Transaction, tx_id)
+    if not t or t.company_id != user.company_id:
+        raise HTTPException(404, "Transaction not found")
+    if t.status != "authorized":
+        raise HTTPException(409, f"Transaction is {t.status}; only authorized transactions can be settled")
+    card = db.get(Card, t.card_id)
+    result = get_adapter(card.provider, company_of(user, db)).settle(card, t.provider_ref, t.amount)
+    if result.ok:
+        t.status = "settled"
+    audit.record(db, t.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="payment.settle_retry",
+                 details={"transaction_id": t.id, "ok": result.ok, "error": result.decline_reason})
+    db.commit()
+    db.refresh(t)
+    if not result.ok:
+        raise HTTPException(502, f"Lithic clearing failed: {result.decline_reason}")
+    return transaction_out(t)
+
+
 # ====================================================== cards
 @router.get("/cards", response_model=list[CardOut], tags=["cards"])
 def list_cards(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
