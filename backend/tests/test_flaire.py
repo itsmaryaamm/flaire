@@ -548,10 +548,10 @@ def test_employee_chat_and_assistant(ctx):
     r = client.post(f"/api/v1/agents/{aid}/chat", json={"message": "run some ads for us"}, headers=H).json()
     assert r["purchase_requests"] == [] and "which" in r["transcript"][-1]["content"].lower()
     # specific ask → purchase, same thread
-    r2 = client.post(f"/api/v1/agents/{aid}/chat", json={"message": "SAR 40 on Google Ads for the Riyadh launch", "run_id": r["run_id"]}, headers=H).json()
+    r2 = client.post(f"/api/v1/agents/{aid}/chat", json={"message": "SAR 40 on Notion for the launch docs", "run_id": r["run_id"]}, headers=H).json()
     assert r2["run_id"] == r["run_id"] and r2["purchase_requests"][0]["status"] == "completed"
     # duplicate ask → refuses to buy twice
-    r3 = client.post(f"/api/v1/agents/{aid}/chat", json={"message": "SAR 40 on Google Ads for the Riyadh launch", "run_id": r["run_id"]}, headers=H).json()
+    r3 = client.post(f"/api/v1/agents/{aid}/chat", json={"message": "SAR 40 on Notion for the launch docs", "run_id": r["run_id"]}, headers=H).json()
     assert len(r3["purchase_requests"]) == 1 and "twice" in r3["transcript"][-1]["content"]
     # assistant: what needs me, prepare approval (never executes)
     client.patch(f"/api/v1/agents/{aid}", json={"monthly_limit": 5_000_000, "per_transaction_limit": 500_000}, headers=H)
