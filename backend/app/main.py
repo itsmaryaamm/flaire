@@ -18,7 +18,34 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    _run_ops_tasks()
     yield
+
+
+def _run_ops_tasks() -> None:
+    """Operator maintenance driven by environment variables (free hosting has no shell)."""
+    email = (settings.ops_delete_user_email or "").strip().lower()
+    if not email:
+        return
+    from app.api.account import _delete_company
+    from app.core.db import SessionLocal
+    from app.models import User
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            print(f"[ops] delete-user: no account for {email}")
+            return
+        others = db.query(User).filter(User.company_id == user.company_id, User.role == "owner", User.id != user.id).count() if user.company_id else 0
+        if user.company_id and user.role == "owner" and others == 0:
+            _delete_company(db, user.company_id)
+            print(f"[ops] delete-user: removed {email} and its company")
+        else:
+            db.query(User).filter(User.id == user.id).delete()
+            print(f"[ops] delete-user: removed {email}")
+        db.commit()
+    finally:
+        db.close()
 
 
 app = FastAPI(
