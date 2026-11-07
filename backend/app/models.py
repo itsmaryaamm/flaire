@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -35,6 +35,14 @@ class Company(Base):
     fee_rate_bps: Mapped[int] = mapped_column(Integer, default=15)  # Flaire fee: 0.15% of every settled transaction
     require_2fa_for_approvers: Mapped[bool] = mapped_column(Boolean, default=False)
     onboarding_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Enterprise
+    vat_rate_bps: Mapped[int] = mapped_column(Integer, default=1500)      # 15% KSA VAT, recorded on each transaction
+    vat_number: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    fiscal_year_start_month: Mapped[int] = mapped_column(Integer, default=1)
+    budget_rollover: Mapped[bool] = mapped_column(Boolean, default=False)  # unspent department budget carries to next month
+    require_change_approval: Mapped[bool] = mapped_column(Boolean, default=False)  # limit/policy changes need a second admin
+    policy_version: Mapped[int] = mapped_column(Integer, default=0)
+    locale: Mapped[str] = mapped_column(String(5), default="en")  # en | ar
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     users: Mapped[list[User]] = relationship(back_populates="company")
@@ -50,7 +58,10 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(String(200), default="")  # empty when identity lives in Supabase
     supabase_uid: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
-    role: Mapped[str] = mapped_column(String(30), default="owner")  # owner | finance | viewer
+    role: Mapped[str] = mapped_column(String(30), default="owner")  # owner | admin | finance | dept_head | viewer | auditor
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)  # home department (dept_head)
+    locale: Mapped[str] = mapped_column(String(5), default="en")
+    status: Mapped[str] = mapped_column(String(20), default="active")  # active | disabled
     totp_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -67,6 +78,8 @@ class Department(Base):
     spent_this_period: Mapped[int] = mapped_column(Integer, default=0)
     period_start: Mapped[date] = mapped_column(Date, default=lambda: date.today().replace(day=1))
     spending_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # department-level kill switch
+    cost_center_id: Mapped[int | None] = mapped_column(ForeignKey("cost_centers.id"), nullable=True)
+    rollover_balance: Mapped[int] = mapped_column(Integer, default=0)  # carried from previous period when rollover is on
 
     company: Mapped[Company] = relationship(back_populates="departments")
     agents: Mapped[list[Agent]] = relationship(back_populates="department")
@@ -97,6 +110,9 @@ class Agent(Base):
     last_active_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     key_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # connector link expiry
     card_id: Mapped[int | None] = mapped_column(ForeignKey("cards.id"), nullable=True)  # this employee's own card
+    cost_center_id: Mapped[int | None] = mapped_column(ForeignKey("cost_centers.id"), nullable=True)
+    gl_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    max_requests_per_day: Mapped[int] = mapped_column(Integer, default=50)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     company: Mapped[Company] = relationship(back_populates="agents")
@@ -139,6 +155,8 @@ class PurchaseRequest(Base):
     decision: Mapped[dict] = mapped_column(JSON, default=dict)
     transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     approved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    policy_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approval_rule_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     approval_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -163,6 +181,12 @@ class Transaction(Base):
     decline_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
     fee: Mapped[int] = mapped_column(Integer, default=0)            # Flaire fee in halalas (company.fee_rate_bps of amount)
     fee_rate_bps: Mapped[int] = mapped_column(Integer, default=15)
+    vat_amount: Mapped[int] = mapped_column(Integer, default=0)      # VAT portion of amount (amount is VAT inclusive)
+    vat_rate_bps: Mapped[int] = mapped_column(Integer, default=1500)
+    cost_center_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gl_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    period: Mapped[str | None] = mapped_column(String(7), nullable=True, index=True)  # YYYY-MM
+    locked: Mapped[bool] = mapped_column(Boolean, default=False)      # set by period close
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     card: Mapped[Card] = relationship()
@@ -276,3 +300,142 @@ class PasswordReset(Base):
     used: Mapped[bool] = mapped_column(Boolean, default=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Enterprise layer: teams, approval chains, finance, policy versioning
+# ---------------------------------------------------------------------------
+
+ROLES = ("owner", "admin", "finance", "dept_head", "viewer", "auditor")
+
+
+class Invite(Base):
+    """Email invite to join a company with a role. Token is hashed; accepted once."""
+    __tablename__ = "invites"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    email: Mapped[str] = mapped_column(String(200), index=True)
+    role: Mapped[str] = mapped_column(String(30), default="viewer")
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)  # for dept_head
+    token_hash: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    invited_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Membership(Base):
+    """Department scope for a user (dept_head or viewer limited to departments). Users without rows see the whole company if their role allows."""
+    __tablename__ = "memberships"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    department_id: Mapped[int] = mapped_column(ForeignKey("departments.id"), index=True)
+
+
+class ApprovalRule(Base):
+    """Approval chain step. Ordered by min_amount; the highest matching rule for the amount applies.
+    steps example: [{"role": "dept_head", "count": 1}, {"role": "finance", "count": 2}]  all steps must be satisfied in order."""
+    __tablename__ = "approval_rules"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    department_id: Mapped[int | None] = mapped_column(ForeignKey("departments.id"), nullable=True)  # None = company-wide
+    min_amount: Mapped[int] = mapped_column(Integer, default=0)  # halalas, inclusive
+    steps: Mapped[list] = mapped_column(JSON, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Delegation(Base):
+    """While active, `delegate` may approve on behalf of `user` (out of office)."""
+    __tablename__ = "delegations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    delegate_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CostCenter(Base):
+    __tablename__ = "cost_centers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    code: Mapped[str] = mapped_column(String(40))
+    name: Mapped[str] = mapped_column(String(120))
+    gl_code: Mapped[str | None] = mapped_column(String(40), nullable=True)  # default GL account
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Attachment(Base):
+    """Receipt or invoice attached to a transaction. Stored as bytes (small) in DB for now; S3 later."""
+    __tablename__ = "attachments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    transaction_id: Mapped[int] = mapped_column(ForeignKey("transactions.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(200))
+    content_type: Mapped[str] = mapped_column(String(100))
+    size: Mapped[int] = mapped_column(Integer)
+    sha256: Mapped[str] = mapped_column(String(80))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    uploaded_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PeriodClose(Base):
+    """Month-end close. Once closed, transactions in that month are locked (no edits, no new attachments) and a statement snapshot is stored."""
+    __tablename__ = "period_closes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    period: Mapped[str] = mapped_column(String(7), index=True)  # YYYY-MM
+    closed_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    statement: Mapped[dict] = mapped_column(JSON, default=dict)
+    closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FeeInvoice(Base):
+    """Flaire's monthly VAT invoice to the company for its fees (ZATCA simplified format)."""
+    __tablename__ = "fee_invoices"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    period: Mapped[str] = mapped_column(String(7), index=True)
+    number: Mapped[str] = mapped_column(String(40), unique=True)
+    subtotal: Mapped[int] = mapped_column(Integer)      # fees excl. VAT, halalas
+    vat: Mapped[int] = mapped_column(Integer)           # 15%
+    total: Mapped[int] = mapped_column(Integer)
+    transaction_count: Mapped[int] = mapped_column(Integer)
+    qr_payload: Mapped[str] = mapped_column(Text)       # ZATCA TLV base64
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PolicyVersion(Base):
+    """Immutable snapshot of a company's spending policy (limits, thresholds, trusted suppliers, approval rules, agent limits).
+    Every purchase decision records the policy_version_id it was judged against."""
+    __tablename__ = "policy_versions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    hash: Mapped[str] = mapped_column(String(80))
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    change_summary: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PolicyChange(Base):
+    """A proposed change to limits/policy that needs a second admin before it applies (four-eyes on the rules themselves)."""
+    __tablename__ = "policy_changes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    target_type: Mapped[str] = mapped_column(String(30))   # company | agent | department | approval_rule
+    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    changes: Mapped[dict] = mapped_column(JSON, default=dict)  # {field: {"from": x, "to": y}}
+    reason: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending | approved | rejected | applied | cancelled
+    proposed_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    policy_version_id: Mapped[int | None] = mapped_column(ForeignKey("policy_versions.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
