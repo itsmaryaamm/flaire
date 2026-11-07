@@ -460,3 +460,40 @@ def test_company_with_null_json_columns_still_loads(ctx):
     out = company_out(c)
     assert out.trusted_merchants == []
     db.rollback(); db.close()
+
+
+def test_supabase_token_onboarding_and_delete(ctx, monkeypatch):
+    """Simulate a Supabase sign-in with an HS256 token, walk onboarding, then delete the company."""
+    import jwt as _jwt, time
+    from app.core.config import get_settings
+    from app.core import guard
+    guard.reset()
+    st = get_settings()
+    st.supabase_url, st.supabase_anon_key, st.supabase_jwt_secret = "https://example.supabase.co", "anon", "super-secret-jwt"
+    try:
+        assert client.get("/api/v1/health").json()["auth"] == "supabase"
+        assert client.get("/api/v1/auth/config").json()["provider"] == "supabase"
+        tok = _jwt.encode({"sub": "11111111-2222-3333-4444-555555555555", "email": "new@company.sa", "aud": "authenticated", "exp": int(time.time()) + 600,
+                           "user_metadata": {"full_name": "Noor"}}, "super-secret-jwt", algorithm="HS256")
+        B = {"Authorization": f"Bearer {tok}"}
+        me = client.get("/api/v1/auth/me", headers=B).json()
+        assert me["needs_onboarding"] is True and me["user"]["full_name"] == "Noor"
+        assert client.get("/api/v1/dashboard/summary", headers=B).json()["detail"] == "onboarding_required"
+        c = client.post("/api/v1/onboarding/company", json={"company_name": "Noor Labs"}, headers=B).json()
+        assert c["company"]["name"] == "Noor Labs"
+        q = client.post("/api/v1/onboarding/quickstart", json={}, headers=B).json()
+        assert set(q["created"]) == {"department", "card", "agent"}
+        stt = client.get("/api/v1/onboarding/status", headers=B).json()
+        assert stt["steps"]["card"] and stt["steps"]["agent"] and not stt["steps"]["claude_connected"]
+        assert client.get("/api/v1/dashboard/summary", headers=B).status_code == 200
+        # delete: password verified against Supabase (mocked)
+        import app.core.supabase as sb
+        monkeypatch.setattr(sb, "password_grant", lambda e, p: {"id": "x"} if p == "pw" else None)
+        monkeypatch.setattr(sb, "admin_delete_user", lambda uid: True)
+        assert client.request("DELETE", "/api/v1/account", json={"confirm": "DELETE", "password": "nope"}, headers=B).status_code == 403
+        r = client.request("DELETE", "/api/v1/account", json={"confirm": "DELETE", "password": "pw"}, headers=B).json()
+        assert r["removed"] == "company"
+        me2 = client.get("/api/v1/auth/me", headers=B).json()
+        assert me2["needs_onboarding"] is True  # a fresh user row again, no company
+    finally:
+        st.supabase_url = st.supabase_anon_key = st.supabase_jwt_secret = None

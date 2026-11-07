@@ -192,7 +192,19 @@ def authorize_submit(request: Request, db: Session = Depends(get_db), email: str
     from app.core import guard
     guard.check_rate(f"oauth:{guard.client_ip(request)}", limit=15, window=900)
     user = db.query(User).filter(User.email == email.lower().strip()).first()
-    if not user or not verify_password(password, user.password_hash):
+    from app.core import supabase as sb
+    if sb.enabled():
+        sb_user = sb.password_grant(email.lower().strip(), password)
+        if not sb_user:
+            return _render(_client_name(db, client_id), params, "Wrong email or password.", email)
+        if not user:
+            user = User(company_id=None, email=email.lower().strip(), full_name=(sb_user.get("user_metadata") or {}).get("full_name") or email.split("@")[0], password_hash="", supabase_uid=sb_user["id"], role="owner")
+            db.add(user); db.flush()
+        elif not user.supabase_uid:
+            user.supabase_uid = sb_user["id"]
+        if user.company_id is None:
+            return _render(_client_name(db, client_id), params, "Finish setting up your company in the Flaire dashboard first, then connect.", email)
+    elif not user or not verify_password(password, user.password_hash):
         return _render(_client_name(db, client_id), params, "Wrong email or password.", email)
     from app.api.auth_extra import totp_ok
     if user.totp_enabled and not totp_ok(user, code):

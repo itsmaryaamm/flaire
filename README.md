@@ -69,6 +69,12 @@ Settings → Connect your Claude shows the URL and every connected Claude, with 
 
 Implementation: `backend/app/api/oauth.py` (OAuth 2.1 with PKCE, dynamic client registration, client-ID metadata documents, `/.well-known` discovery) and `backend/app/api/mcp.py` (MCP Streamable HTTP, JSON responses, stateless). Works with Claude.ai, Claude Desktop, Claude Code (`claude mcp add --transport http flaire <url>`) and any MCP client that supports OAuth.
 
+## Accounts: Supabase Auth
+
+Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` and `SUPABASE_JWT_SECRET` on the backend and identity moves to Supabase: sign-up with email confirmation, login, password reset emails, magic links and Google sign-in, with no SMTP to configure. Flaire keeps its own user row per person (role, company, 2FA for approvals, audit trail) linked by the Supabase user id, and the Claude connector sign-in page verifies passwords through Supabase. Without those variables the built-in email + password auth is used (that is what the tests run against).
+
+New users get a four-step walkthrough at `/welcome` (company, first budget plus a simulated card and AI employee, connect Claude, done) and a "Getting started" checklist on the dashboard until everything is set up. Settings → Danger zone deletes the account; a sole owner deleting their account deletes the whole company.
+
 ## Payments inside Flaire
 
 Settings → Payments takes your Lithic sandbox API key; Flaire stores it encrypted per company (Fernet, key from `APP_ENCRYPTION_KEY`, falling back to `JWT_SECRET`). Cards → Add card → Lithic sandbox then creates a real virtual card in your Lithic sandbox and every approved purchase on it shows up in Lithic's transactions. The environment variable `LITHIC_API_KEY` still works as a global fallback. Later, this screen becomes real card details.

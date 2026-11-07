@@ -171,14 +171,14 @@ def resolve_approval(db: Session, company: Company, user: User, pr: PurchaseRequ
       2. two-person rule at/above company.two_person_threshold: two different humans must approve
       3. kill switch freezes approvals; budgets and limits are re-checked by the engine at approval time
     """
-    from app.core.security import verify_password
+    from app.core.security import verify_user_password
 
     if pr.status != "pending_approval":
         raise HTTPException(409, f"Request is {pr.status}, not pending approval")
     if company.kill_switch and approve:
         raise HTTPException(409, "Kill switch is ON. Lift it before approving any spending.")
     if company.require_password_on_approve:
-        if not password or not verify_password(password, user.password_hash):
+        if not verify_user_password(user, password):
             audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="approval.password_failed", details={"request_id": pr.id})
             db.commit()
             raise HTTPException(403, "Password confirmation failed. Re-enter your password to approve or reject.")

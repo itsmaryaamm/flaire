@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     app_encryption_key: str | None = None  # for per-company secrets (payment keys); defaults to JWT_SECRET
     api_base_url: str = "http://localhost:8000"  # public URL of this API, used in OAuth metadata and connector links
 
+    # Supabase Auth (optional). When set, identity moves to Supabase; Flaire keeps roles, companies and 2FA.
+    supabase_url: str | None = None
+    supabase_anon_key: str | None = None
+    supabase_service_role_key: str | None = None
+    supabase_jwt_secret: str | None = None
+
     # Claude AI employees
     anthropic_api_key: str | None = None
     claude_model: str = "claude-sonnet-4-5"

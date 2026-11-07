@@ -43,6 +43,9 @@ def company_out(c: Company) -> CompanyOut:
 # ====================================================== auth
 @router.post("/auth/register", response_model=AuthOut, status_code=201, tags=["auth"])
 def register(body: RegisterIn, db: Session = Depends(get_db)):
+    from app.core import supabase as sb
+    if sb.enabled():
+        raise HTTPException(409, "Sign up is handled by the sign-in provider on the dashboard.")
     if db.query(User).filter(User.email == body.email.lower()).first():
         raise HTTPException(409, "Email already registered")
     company = Company(name=body.company_name, engine=settings.auth_engine)
@@ -74,7 +77,15 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
 
 @router.get("/auth/me", tags=["auth"])
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return {"user": UserOut.model_validate(user), "company": company_out(company_of(user, db))}
+    c = company_of(user, db) if user.company_id else None
+    return {"user": UserOut.model_validate(user), "company": company_out(c) if c else None, "needs_onboarding": c is None}
+
+
+@router.get("/auth/config", tags=["auth"])
+def auth_config():
+    from app.core import supabase as sb
+    return {"provider": "supabase" if sb.enabled() else "builtin", "supabase_url": settings.supabase_url if sb.enabled() else None,
+            "supabase_anon_key": settings.supabase_anon_key if sb.enabled() else None}
 
 
 # ====================================================== company

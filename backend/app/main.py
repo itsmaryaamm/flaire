@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.account import router as account_router
 from app.api.auth_extra import router as auth_extra_router
 from app.api.mcp import router as mcp_router
 from app.api.oauth import router as oauth_router, well_known
@@ -31,6 +32,7 @@ app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allo
 app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(router, prefix="/api/v1")
 app.include_router(auth_extra_router, prefix="/api/v1")
+app.include_router(account_router, prefix="/api/v1")
 app.include_router(mcp_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(oauth_router, prefix="/api/v1")
@@ -40,7 +42,7 @@ app.include_router(well_known)
 @app.get("/api/v1/health", tags=["health"])
 def health():
     return {"status": "ok", "engine": settings.auth_engine, "payments": ["mock_snb", "mock_rajhi", "mock_riyad"] + (["lithic"] if settings.lithic_enabled else []),
-            "claude": settings.claude_enabled, "env": settings.env}
+            "claude": settings.claude_enabled, "env": settings.env, "auth": "supabase" if (settings.supabase_url and settings.supabase_anon_key) else "builtin"}
 
 
 @app.get("/")

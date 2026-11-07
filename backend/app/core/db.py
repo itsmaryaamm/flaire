@@ -46,8 +46,8 @@ def init_db() -> None:
 _NEW_COLUMNS = {
     "companies": [("require_password_on_approve", "BOOLEAN DEFAULT 1"), ("two_person_threshold", "INTEGER DEFAULT 250000"), ("kill_switch_frozen_cards", "JSON NULL"),
                   ("trusted_merchants", "JSON NULL"), ("new_merchant_review_from", "INTEGER DEFAULT 20000"),
-                  ("notify_threshold", "INTEGER DEFAULT 0"), ("lithic_api_key_enc", "TEXT NULL"), ("require_2fa_for_approvers", "BOOLEAN DEFAULT 0")],
-    "users": [("totp_secret_enc", "TEXT NULL"), ("totp_enabled", "BOOLEAN DEFAULT 0")],
+                  ("notify_threshold", "INTEGER DEFAULT 0"), ("lithic_api_key_enc", "TEXT NULL"), ("require_2fa_for_approvers", "BOOLEAN DEFAULT 0"), ("onboarding_done", "BOOLEAN DEFAULT 1")],
+    "users": [("totp_secret_enc", "TEXT NULL"), ("totp_enabled", "BOOLEAN DEFAULT 0"), ("supabase_uid", "VARCHAR(64) NULL")],
     "agents": [("key_expires_at", "TIMESTAMP NULL")],
     "departments": [("spending_paused", "BOOLEAN DEFAULT 0")],
 }
@@ -67,6 +67,9 @@ def _migrate() -> None:
                     continue
                 ddl_pg = ddl.replace("BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE").replace("BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE").replace("TIMESTAMP NULL", "TIMESTAMPTZ NULL")
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_pg if is_pg else ddl}"))
+        if is_pg and "users" in insp.get_table_names():
+            conn.execute(text("ALTER TABLE users ALTER COLUMN company_id DROP NOT NULL"))
+            conn.execute(text("ALTER TABLE users ALTER COLUMN password_hash SET DEFAULT ''"))
         # Backfill NULL JSON lists so older rows load cleanly.
         for table, col in (("companies", "trusted_merchants"), ("companies", "kill_switch_frozen_cards"), ("agents", "allowed_categories"), ("agents", "blocked_merchants")):
             if table in insp.get_table_names() and col in {c["name"] for c in insp.get_columns(table)}:

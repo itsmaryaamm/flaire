@@ -22,7 +22,7 @@ from app.core import audit, guard
 from app.core.config import get_settings
 from app.core.crypto import decrypt, encrypt
 from app.core.db import get_db
-from app.core.security import get_current_user, hash_api_key, hash_password, verify_password
+from app.core.security import get_current_user, hash_api_key, hash_password, verify_password, verify_user_password
 from app.models import Company, OAuthToken, PasswordReset, User, utcnow
 
 router = APIRouter()
@@ -72,6 +72,8 @@ def forgot(body: ForgotIn, request: Request, db: Session = Depends(get_db)):
     guard.check_rate(f"forgot:{guard.client_ip(request)}", limit=5, window=900)
     user = db.query(User).filter(User.email == body.email.lower()).first()
     s = get_settings()
+    if user and user.supabase_uid:
+        return {"ok": True, "message": "Use the reset link on the sign-in page; your password is managed by the sign-in provider."}
     if user:
         raw = secrets.token_urlsafe(32)
         db.add(PasswordReset(user_id=user.id, token_hash=hash_api_key(raw), expires_at=utcnow() + timedelta(hours=1)))
@@ -110,6 +112,8 @@ class ChangePasswordIn(BaseModel):
 
 @router.post("/auth/change-password", tags=["auth"])
 def change_password(body: ChangePasswordIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if user.supabase_uid:
+        raise HTTPException(409, "Your password is managed by the sign-in provider. Use the dashboard's reset flow.")
     if not verify_password(body.current_password, user.password_hash):
         raise HTTPException(403, "Current password is wrong.")
     user.password_hash = hash_password(body.new_password)
@@ -162,7 +166,7 @@ def twofa_enable(body: CodeIn, user: User = Depends(get_current_user), db: Sessi
 
 @router.post("/auth/2fa/disable", tags=["auth"])
 def twofa_disable(body: DisableIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not verify_password(body.password, user.password_hash) or not totp_ok(user, body.code):
+    if not verify_user_password(user, body.password) or not totp_ok(user, body.code):
         raise HTTPException(403, "Password or code is wrong.")
     company = db.get(Company, user.company_id)
     if company.require_2fa_for_approvers and user.role in ("owner", "finance"):

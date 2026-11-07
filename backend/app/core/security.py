@@ -35,17 +35,54 @@ def create_access_token(user_id: int, company_id: int) -> str:
     return jwt.encode({"sub": str(user_id), "cid": company_id, "exp": exp}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
-def get_current_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)) -> User:
+ONBOARDING_OK_PATHS = ("/api/v1/auth/me", "/api/v1/onboarding", "/api/v1/account", "/api/v1/auth/2fa", "/api/v1/auth/change-password")
+
+
+def _user_from_supabase(db: Session, token: str) -> User | None:
+    from app.core.supabase import verify_supabase_token
+    claims = verify_supabase_token(token)
+    if not claims or not claims.get("sub"):
+        return None
+    uid = claims["sub"]
+    email = (claims.get("email") or "").lower()
+    user = db.query(User).filter(User.supabase_uid == uid).first()
+    if not user and email:
+        user = db.query(User).filter(User.email == email).first()  # link a pre-existing Flaire account by email
+        if user:
+            user.supabase_uid = uid
+    if not user:
+        meta = claims.get("user_metadata") or {}
+        user = User(company_id=None, email=email or f"{uid}@supabase.local", full_name=meta.get("full_name") or meta.get("name") or email.split("@")[0],
+                    password_hash="", supabase_uid=uid, role="owner")
+        db.add(user)
+    db.commit()
+    return user
+
+
+def get_current_user(request: Request, creds: HTTPAuthorizationCredentials | None = Depends(bearer), db: Session = Depends(get_db)) -> User:
     if creds is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
+    user = None
     try:
         payload = jwt.decode(creds.credentials, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        user = db.get(User, int(payload["sub"]))
     except jwt.PyJWTError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
-    user = db.get(User, int(payload["sub"]))
+        user = _user_from_supabase(db, creds.credentials)
     if not user:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User no longer exists")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+    if user.company_id is None and not request.url.path.startswith(ONBOARDING_OK_PATHS):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "onboarding_required")
     return user
+
+
+def verify_user_password(user: User, password: str | None) -> bool:
+    """Password check that works for both identity stores: Supabase (password grant) or Flaire's own bcrypt hash."""
+    if not password:
+        return False
+    if user.supabase_uid:
+        from app.core.supabase import password_grant
+        return password_grant(user.email, password) is not None
+    return verify_password(password, user.password_hash)
 
 
 def require_approver(user: User = Depends(get_current_user)) -> User:
