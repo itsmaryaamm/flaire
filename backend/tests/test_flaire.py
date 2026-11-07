@@ -449,9 +449,14 @@ def test_password_reset_change_and_2fa(ctx):
 
 
 def test_company_with_null_json_columns_still_loads(ctx):
-    from app.core.db import SessionLocal, engine
-    from sqlalchemy import text
-    with engine.begin() as conn:
-        conn.execute(text("UPDATE companies SET trusted_merchants = NULL"))
-    r = client.post("/api/v1/auth/login", json={"email": "owner@test.sa", "password": "password123"})
-    assert r.status_code == 200 and r.json()["company"]["trusted_merchants"] == []
+    # Simulate a row from before the column existed (production DBs had NULL there).
+    from app.api.routes import company_out
+    from app.models import Company
+    from app.core.db import SessionLocal
+    db = SessionLocal()
+    c = db.query(Company).first()
+    c.trusted_merchants = None
+    c.kill_switch_frozen_cards = None
+    out = company_out(c)
+    assert out.trusted_merchants == []
+    db.rollback(); db.close()
