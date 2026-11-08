@@ -133,23 +133,81 @@ def _lithic_client(company: Company) -> httpx.Client:
     return httpx.Client(base_url=s.lithic_base_url.rstrip("/"), headers={"Authorization": key, "Content-Type": "application/json"}, timeout=15)
 
 
+def enroll_asa(db: Session, company: Company, api_base: str, actor: User | None = None) -> dict:
+    """Register Flaire's ASA endpoint with Lithic and store the signing secret. Shared by the manual endpoint and the automatic
+    attempt when a key is saved. Never raises: the outcome (enrolled, error) is stored on the company and returned."""
+    url = f"{api_base.rstrip('/')}/api/v1/webhooks/lithic/asa"
+    secret = None
+    try:
+        with _lithic_client(company) as c:
+            r = c.post("/auth_stream/enroll", json={"webhook_url": url})
+            if r.status_code >= 400 and "already" not in r.text.lower():
+                raise RuntimeError(f"Lithic refused enrollment: {r.status_code} {r.text[:200]}")
+            sec = c.get("/auth_stream/secret")
+            secret = sec.json().get("secret") if sec.status_code < 400 else None
+    except HTTPException as exc:
+        error = str(exc.detail)
+    except Exception as exc:
+        error = str(exc)[:280]
+    else:
+        error = None
+    if error:
+        company.lithic_asa_enrolled = False
+        company.lithic_asa_error = error[:300]
+        audit.record(db, company.id, actor_type="user" if actor else "system", actor_id=actor.id if actor else None, actor_name=actor.full_name if actor else "payments",
+                     event="asa.enroll_failed", details={"url": url, "error": error[:300]})
+        return {"ok": False, "url": url, "signed": False, "error": error}
+    company.lithic_asa_enrolled = True
+    company.lithic_asa_error = None
+    if secret:
+        company.lithic_asa_secret_enc = encrypt(secret)
+    audit.record(db, company.id, actor_type="user" if actor else "system", actor_id=actor.id if actor else None, actor_name=actor.full_name if actor else "payments",
+                 event="asa.enrolled", details={"url": url, "signed": bool(secret), "automatic": actor is None})
+    return {"ok": True, "url": url, "signed": bool(secret), "error": None}
+
+
+def detect_lithic_environment(key: str | None) -> str:
+    """sandbox or production. The key prefix decides when it can; otherwise a cheap GET against the sandbox host with that key decides."""
+    s = get_settings()
+    k = (key or "").strip().lower()
+    if not k:
+        return "sandbox" if "sandbox" in s.lithic_base_url else "production"
+    if "sandbox" in k or k.startswith("sk_test") or k.startswith("test_"):
+        return "sandbox"
+    if k.startswith("sk_live") or k.startswith("live_") or k.startswith("prod"):
+        return "production"
+    try:
+        r = httpx.get("https://sandbox.lithic.com/v1/cards", params={"page_size": 1}, headers={"Authorization": key.strip()}, timeout=5)
+        if r.status_code < 400:
+            return "sandbox"
+        if r.status_code in (401, 403):
+            return "production"
+    except Exception:
+        pass
+    return "sandbox" if "sandbox" in s.lithic_base_url else "production"
+
+
+def on_lithic_key_saved(db: Session, company: Company, api_base: str, actor: User) -> dict:
+    """Runs right after a Lithic key is stored: detect the environment, issue cards for employees without one, try ASA enrollment."""
+    from app.cards import issue_missing_cards
+    key = decrypt(company.lithic_api_key_enc) if company.lithic_api_key_enc else None
+    company.lithic_environment = detect_lithic_environment(key)
+    issued = issue_missing_cards(db, company, actor=actor.full_name)
+    asa = enroll_asa(db, company, api_base, actor=None)
+    return {"environment": company.lithic_environment, "cards_issued": [c.id for c in issued], "asa": asa}
+
+
 @router.post("/settings/lithic/asa/enroll", tags=["payments"])
 def asa_enroll(request: Request, user: User = Depends(require_approver), db: Session = Depends(get_db)):
     from app.api.oauth import base_url
     company = db.get(Company, user.company_id)
-    url = f"{base_url(request)}/api/v1/webhooks/lithic/asa"
-    with _lithic_client(company) as c:
-        r = c.post("/auth_stream/enroll", json={"webhook_url": url})
-        if r.status_code >= 400 and "already" not in r.text.lower():
-            raise HTTPException(502, f"Lithic refused enrollment: {r.status_code} {r.text[:200]}")
-        sec = c.get("/auth_stream/secret")
-        secret = sec.json().get("secret") if sec.status_code < 400 else None
-    company.lithic_asa_enrolled = True
-    if secret:
-        company.lithic_asa_secret_enc = encrypt(secret)
-    audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="asa.enrolled", details={"url": url, "signed": bool(secret)})
+    if not (company.lithic_api_key_enc or get_settings().lithic_api_key):
+        raise HTTPException(409, "Add your Lithic API key first.")
+    out = enroll_asa(db, company, base_url(request), actor=user)
     db.commit()
-    return {"ok": True, "url": url, "signed": bool(secret)}
+    if not out["ok"]:
+        raise HTTPException(502, out["error"])
+    return {"ok": True, "url": out["url"], "signed": out["signed"]}
 
 
 @router.delete("/settings/lithic/asa/enroll", tags=["payments"])
@@ -159,6 +217,7 @@ def asa_disenroll(user: User = Depends(require_approver), db: Session = Depends(
         c.delete("/auth_stream/enroll")
     company.lithic_asa_enrolled = False
     company.lithic_asa_secret_enc = None
+    company.lithic_asa_error = None
     audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="asa.disenrolled", details={})
     db.commit()
     return {"ok": True}
@@ -168,5 +227,7 @@ def asa_disenroll(user: User = Depends(require_approver), db: Session = Depends(
 def lithic_status(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     company = db.get(Company, user.company_id)
     s = get_settings()
-    return {"configured": bool(company.lithic_api_key_enc or s.lithic_api_key), "asa_enrolled": bool(company.lithic_asa_enrolled),
-            "asa_signed": bool(company.lithic_asa_secret_enc), "fee_rate_bps": company.fee_rate_bps, "environment": "sandbox" if "sandbox" in s.lithic_base_url else "production"}
+    configured = bool(company.lithic_api_key_enc or s.lithic_api_key)
+    env = company.lithic_environment if (company.lithic_api_key_enc and company.lithic_environment) else ("sandbox" if "sandbox" in s.lithic_base_url else "production")
+    return {"configured": configured, "asa_enrolled": bool(company.lithic_asa_enrolled), "asa_error": company.lithic_asa_error if configured else None,
+            "asa_signed": bool(company.lithic_asa_secret_enc), "fee_rate_bps": company.fee_rate_bps, "environment": env}

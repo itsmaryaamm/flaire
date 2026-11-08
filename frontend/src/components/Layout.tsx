@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Home, Users, Activity, Settings, LogOut, ShieldAlert, ShieldCheck, UserCog, Landmark, Scale, MoreHorizontal } from 'lucide-react'
+import { Home, Users, Activity, Settings, LogOut, ShieldAlert, ShieldCheck, UserCog, Landmark, Scale, Server } from 'lucide-react'
 import { useAuth } from '../lib/auth'
 import { api } from '../lib/api'
 import { useFetch } from '../lib/useFetch'
@@ -9,7 +9,7 @@ import { useView, hasAdminView } from '../lib/view'
 import type { PurchaseRequest } from '../types'
 import { KillSwitchBanner } from './KillSwitchBanner'
 import { useKillSwitch } from './KillSwitchPanel'
-import { BottomSheet } from './BottomSheet'
+import { NotificationsBell } from './NotificationsBell'
 
 type NavItem = { to: string; key: string; icon: typeof Home; end?: boolean }
 
@@ -23,10 +23,16 @@ const ALL_NAV: (NavItem & { admin?: boolean })[] = [
   { to: '/settings', key: 'nav.settings', icon: Settings },
 ]
 
-/** Nav items this role may open. */
-export function navForRole(role: string | undefined | null): NavItem[] {
+const PLATFORM_NAV: NavItem = { to: '/platform', key: 'nav.platform', icon: Server }
+
+/** Phone tabs: the simplest app. Employees is reachable from Settings. */
+const PHONE_TABS = ['/', '/activity', '/settings']
+
+/** Nav items this role may open on desktop. Platform staff also get the console. */
+export function navForRole(role: string | undefined | null, platformAdmin = false): NavItem[] {
   const admin = hasAdminView(role)
-  return ALL_NAV.filter((n) => !n.admin || admin)
+  const items: NavItem[] = ALL_NAV.filter((n) => !n.admin || admin)
+  return platformAdmin ? [...items, PLATFORM_NAV] : items
 }
 
 function initials(name: string | undefined, email: string | undefined): string {
@@ -60,7 +66,7 @@ export function KillSwitchPill({ className = '' }: { className?: string }) {
   )
 }
 
-/** "My view | Admin view" segmented toggle. Rendered only for roles that have an admin view. */
+/** "My view | Admin view" segmented toggle. Desktop only, and only for roles that have an admin view. */
 export function ViewToggle({ className = '', compact = false }: { className?: string; compact?: boolean }) {
   const { mode, canSwitch, setMode } = useView()
   const t = useT()
@@ -85,27 +91,19 @@ export function ViewToggle({ className = '', compact = false }: { className?: st
   )
 }
 
-const MAX_TABS = 5
-
 /**
- * One responsive shell. Desktop (md and up): slim sidebar on the start side (left in English, right in Arabic).
- * Phones: bottom tab bar, with a "More" sheet when the role has more destinations than fit.
+ * One responsive shell. Desktop (md and up): slim sidebar on the start side (left in English, right in Arabic) with every destination.
+ * Phones: three bottom tabs (Home, Activity, Settings) and a top bar with the bell.
  */
 export function Layout() {
   const { user, company, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const t = useT()
-  const [moreOpen, setMoreOpen] = useState(false)
   const pending = useFetch(() => api.get<PurchaseRequest[]>('/approvals').then((r) => r.data), [location.pathname])
   const pendingCount = pending.data?.length ?? 0
-  const nav = useMemo(() => navForRole(user?.role), [user?.role])
-
-  // Phone tabs: everything fits up to MAX_TABS; otherwise the first MAX_TABS - 1 plus "More".
-  const overflow = nav.length > MAX_TABS
-  const primary = overflow ? nav.filter((n) => ['/', '/employees', '/activity', '/settings'].includes(n.to)) : nav
-  const extra = overflow ? nav.filter((n) => !primary.includes(n)) : []
-  const moreActive = extra.some((n) => location.pathname.startsWith(n.to))
+  const nav = useMemo(() => navForRole(user?.role, !!user?.is_platform_admin), [user?.role, user?.is_platform_admin])
+  const phoneTabs = useMemo(() => PHONE_TABS.map((to) => ALL_NAV.find((n) => n.to === to)!), [])
 
   const doLogout = async () => {
     await logout()
@@ -153,7 +151,7 @@ export function Layout() {
           </nav>
           <div className="px-4 pb-5 space-y-4">
             <KillSwitchPill className="w-full justify-center" />
-            <div className="pt-4 border-t border-line flex items-center gap-2.5">
+            <div className="pt-4 border-t border-line flex items-center gap-1.5">
               <span className="h-8 w-8 shrink-0 inline-flex items-center justify-center rounded-full bg-brand text-white text-xs font-bold">
                 {initials(user?.full_name, user?.email)}
               </span>
@@ -163,6 +161,7 @@ export function Layout() {
                   {user?.role ? t(`role.${user.role}`) : user?.email}
                 </div>
               </div>
+              <NotificationsBell placement="bottom" />
               <button onClick={doLogout} className="btn-ghost p-1.5" aria-label={t('auth.signOut')} title={t('auth.signOut')}>
                 <LogOut className="h-4 w-4 rtl-flip" />
               </button>
@@ -174,10 +173,12 @@ export function Layout() {
           {/* Phone top bar */}
           <header className="md:hidden sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-line px-4 h-14 flex items-center justify-between gap-2 pt-[env(safe-area-inset-top)]">
             <img src="/flaire-logo.png" alt="Flaire" className="h-6 w-auto shrink-0" />
-            <ViewToggle compact />
-            <button onClick={doLogout} className="btn-ghost p-2 text-neutral-500 shrink-0" aria-label={t('auth.signOut')}>
-              <LogOut className="h-4 w-4 rtl-flip" />
-            </button>
+            <div className="flex items-center gap-1">
+              <NotificationsBell />
+              <button onClick={doLogout} className="btn-ghost p-2 text-neutral-500 shrink-0" aria-label={t('auth.signOut')}>
+                <LogOut className="h-4 w-4 rtl-flip" />
+              </button>
+            </div>
           </header>
 
           <main className="flex-1 w-full max-w-[1100px] mx-auto px-4 py-5 md:px-8 md:py-8 pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-10">
@@ -187,11 +188,8 @@ export function Layout() {
       </div>
 
       {/* Phone bottom tab bar */}
-      <nav
-        className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-line grid h-16 pb-[env(safe-area-inset-bottom)]"
-        style={{ gridTemplateColumns: `repeat(${primary.length + (overflow ? 1 : 0)}, minmax(0, 1fr))` }}
-      >
-        {primary.map((n) => (
+      <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-white/95 backdrop-blur border-t border-line grid grid-cols-3 h-16 pb-[env(safe-area-inset-bottom)]">
+        {phoneTabs.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => tabClass(isActive)}>
             {({ isActive }) => (
               <>
@@ -208,34 +206,7 @@ export function Layout() {
             )}
           </NavLink>
         ))}
-        {overflow && (
-          <button type="button" onClick={() => setMoreOpen(true)} className={tabClass(moreActive)} aria-haspopup="dialog">
-            <span className={`inline-flex h-7 w-12 items-center justify-center rounded-pill ${moreActive ? 'bg-brand-light' : ''}`}>
-              <MoreHorizontal className="h-5 w-5" />
-            </span>
-            <span>{t('nav.more')}</span>
-          </button>
-        )}
       </nav>
-
-      <BottomSheet open={moreOpen} onClose={() => setMoreOpen(false)} title={t('nav.more')}>
-        <ul className="space-y-1">
-          {extra.map((n) => (
-            <li key={n.to}>
-              <NavLink
-                to={n.to}
-                onClick={() => setMoreOpen(false)}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-input px-3 py-3 text-sm font-semibold ${isActive ? 'bg-brand-light text-brand' : 'text-ink hover:bg-lavender'}`
-                }
-              >
-                <n.icon className="h-4 w-4" />
-                {t(n.key)}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
-      </BottomSheet>
     </div>
   )
 }

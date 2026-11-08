@@ -163,7 +163,7 @@ def test_mcp_connector(ctx):
     assert init["result"]["serverInfo"]["name"] == "flaire"
     assert client.post(url, json={"jsonrpc": "2.0", "method": "notifications/initialized"}).status_code == 202
     tools = client.post(url, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).json()["result"]["tools"]
-    assert {t["name"] for t in tools} == {"check_budget", "request_purchase", "get_purchase_status", "list_my_requests"}
+    assert {t["name"] for t in tools} == {"check_budget", "request_purchase", "get_purchase_status", "list_my_requests", "search", "fetch"}
     r = client.post(url, json={"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "request_purchase", "arguments": {"amount_sar": 5, "merchant": "Google Ads", "category": "advertising", "description": "mcp"}}}).json()
     body = _json.loads(r["result"]["content"][0]["text"])
     assert body["status"] == "completed" and r["result"]["isError"] is False
@@ -486,7 +486,8 @@ def test_supabase_token_onboarding_and_delete(ctx, monkeypatch):
         q = client.post("/api/v1/onboarding/quickstart", json={}, headers=B).json()
         assert set(q["created"]) == {"department", "card", "agent"}
         stt = client.get("/api/v1/onboarding/status", headers=B).json()
-        assert stt["steps"]["card"] and stt["steps"]["agent"] and not stt["steps"]["claude_connected"]
+        assert not stt["steps"]["card"] and stt["steps"]["agent"] and stt["steps"]["employee"] and not stt["steps"]["claude_connected"]  # card step = Lithic key saved
+        assert stt["next_step"] == "twofa"
         assert client.get("/api/v1/dashboard/summary", headers=B).status_code == 200
         # delete: password verified against Supabase (mocked)
         import app.core.supabase as sb

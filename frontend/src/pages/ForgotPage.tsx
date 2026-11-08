@@ -5,12 +5,14 @@ import { MailCheck } from 'lucide-react'
 import { errorMessage } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import type { ForgotResult } from '../lib/auth'
+import { useT } from '../lib/i18n'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
 import { AuthShell } from './AuthShell'
 
 export default function ForgotPage() {
-  const { forgot } = useAuth()
+  const { forgot, provider } = useAuth()
+  const t = useT()
   const [email, setEmail] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -31,17 +33,17 @@ export default function ForgotPage() {
   }
 
   return (
-    <AuthShell title="Reset your password" subtitle="Enter your work email and we will send you a link to choose a new one.">
+    <AuthShell title={t('forgot.title')} subtitle={t('forgot.subtitle')}>
       {result ? (
         <div className="space-y-4">
           <div className="flex items-start gap-3 rounded-card border border-line bg-success-tint px-3.5 py-3 text-sm text-success">
             <MailCheck className="h-4 w-4 mt-0.5 shrink-0" />
-            <span>{result.message}</span>
+            <span>{provider === 'supabase' ? t('forgot.sent', { email: email.trim() }) : result.message}</span>
           </div>
           {result.reset_link && (
             <div className="rounded-card border border-dashed border-line-strong bg-lavender px-3.5 py-3 text-xs text-neutral-600">
               <a href={result.reset_link} className="text-brand font-semibold hover:underline break-all">
-                Dev only: open reset link
+                {t('forgot.devLink')}
               </a>
             </div>
           )}
@@ -49,7 +51,7 @@ export default function ForgotPage() {
       ) : (
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label className="label" htmlFor="email">Email</label>
+            <label className="label" htmlFor="email">{t('auth.email')}</label>
             <input
               id="email"
               type="email"
@@ -63,15 +65,15 @@ export default function ForgotPage() {
           </div>
           <ErrorNote message={error} />
           <button type="submit" className="btn-primary w-full" disabled={busy}>
-            {busy && <Spinner />} Send link
+            {busy && <Spinner />} {t('forgot.sendLink')}
           </button>
         </form>
       )}
 
       <p className="text-sm text-neutral-500 mt-6">
-        Remembered it?{' '}
+        {t('forgot.remembered')}{' '}
         <Link to="/login" className="text-brand font-semibold hover:underline">
-          Back to sign in
+          {t('auth.backToSignIn')}
         </Link>
       </p>
     </AuthShell>

@@ -204,6 +204,8 @@ def accept_invite(body: InviteAcceptIn, request: Request, creds: HTTPAuthorizati
     inv.accepted_at = utcnow()
     audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="team.invite_accepted",
                  details={"invite_id": inv.id, "email": inv.email, "role": inv.role, "department_id": inv.department_id, "path": "linked" if current else "builtin"})
+    from app.core.notify import notify_invite_accepted
+    notify_invite_accepted(db, c, inv.invited_by_id, user)
     db.commit()
     db.refresh(user)
     from app.api.routes import company_out
@@ -307,6 +309,11 @@ def delete_member(member_id: int, user: User = Depends(require_role("owner")), d
     db.query(PolicyVersion).filter(PolicyVersion.created_by_id == m.id).update({"created_by_id": None})
     db.query(PolicyChange).filter(PolicyChange.proposed_by_id == m.id).update({"proposed_by_id": user.id})
     db.query(PolicyChange).filter(PolicyChange.decided_by_id == m.id).update({"decided_by_id": None})
+    from app.models import Agent, Notification, Transaction
+    db.query(Notification).filter(Notification.user_id == m.id).delete()
+    # Accountability never goes blank: the removing owner takes over the member's employees; past transactions keep their record via the company's first owner.
+    db.query(Agent).filter(Agent.owner_user_id == m.id).update({"owner_user_id": user.id})
+    db.query(Transaction).filter(Transaction.accountable_user_id == m.id).update({"accountable_user_id": user.id})
     audit.record(db, user.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="team.member_removed",
                  details={"member_id": m.id, "email": m.email, "role": m.role})
     uid = m.supabase_uid

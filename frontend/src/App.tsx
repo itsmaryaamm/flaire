@@ -13,6 +13,9 @@ import EmployeeDetailPage from './pages/EmployeeDetailPage'
 import ActivityPage from './pages/ActivityPage'
 import SettingsPage from './pages/SettingsPage'
 import WelcomePage from './pages/WelcomePage'
+import LandingPage from './pages/LandingPage'
+import SetupPage from './pages/SetupPage'
+import AuthCallbackPage from './pages/AuthCallbackPage'
 import { hasAdminView } from './lib/view'
 
 // The team, finance and policy pages are admin tools; load them only when opened.
@@ -20,6 +23,7 @@ const TeamPage = lazy(() => import('./pages/TeamPage'))
 const FinancePage = lazy(() => import('./pages/FinancePage'))
 const PolicyPage = lazy(() => import('./pages/PolicyPage'))
 const InviteAcceptPage = lazy(() => import('./pages/InviteAcceptPage'))
+const PlatformPage = lazy(() => import('./pages/PlatformPage'))
 
 /** Pages for owner, admin, finance and auditor only. Everyone else lands on Home. */
 function RequireAdminView() {
@@ -28,20 +32,26 @@ function RequireAdminView() {
   return <Outlet />
 }
 
-/** Needs a session. Users without a company are sent to the walkthrough; /welcome itself never needs a company. */
+/**
+ * Needs a session. Logged-out visitors on / get the public landing page; elsewhere they go to sign in.
+ * Anyone who still has setup to finish (no company, no 2FA, wizard not completed) is sent to /setup.
+ */
 function RequireAuth() {
-  const { isAuthenticated, needsOnboarding, loading } = useAuth()
+  const { isAuthenticated, setupRequired, loading } = useAuth()
   const location = useLocation()
   if (loading) return <PageLoader />
-  if (!isAuthenticated) return <Navigate to="/login" replace state={{ from: location.pathname }} />
-  if (needsOnboarding && location.pathname !== '/welcome') return <Navigate to="/welcome" replace />
+  if (!isAuthenticated) {
+    if (location.pathname === '/') return <LandingPage />
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  }
+  if (setupRequired && location.pathname !== '/setup' && location.pathname !== '/welcome') return <Navigate to="/setup" replace />
   return <Outlet />
 }
 
 function PublicOnly() {
-  const { isAuthenticated, needsOnboarding, loading } = useAuth()
+  const { isAuthenticated, setupRequired, loading } = useAuth()
   if (loading) return <PageLoader />
-  if (isAuthenticated) return <Navigate to={needsOnboarding ? '/welcome' : '/'} replace />
+  if (isAuthenticated) return <Navigate to={setupRequired ? '/setup' : '/'} replace />
   return <Outlet />
 }
 
@@ -62,9 +72,12 @@ export default function App() {
         </Route>
         {/* Not PublicOnly: in Supabase mode the recovery link signs the user in before they choose a password. */}
         <Route path="/reset" element={<ResetPage />} />
+        {/* Supabase sends confirmation, magic link, Google and recovery redirects here. */}
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
         {/* Public: the invite page works signed in or out and decides what to show. */}
         <Route path="/invite/:token" element={<InviteAcceptPage />} />
         <Route element={<RequireAuth />}>
+          <Route path="/setup" element={<SetupPage />} />
           <Route path="/welcome" element={<WelcomePage />} />
           <Route element={<Layout />}>
             <Route path="/" element={<HomePage />} />
@@ -77,6 +90,7 @@ export default function App() {
               <Route path="/policy" element={<PolicyPage />} />
             </Route>
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/platform" element={<PlatformPage />} />
             {/* Old routes */}
             <Route path="/m" element={<Navigate to="/" replace />} />
             <Route path="/approvals" element={<Navigate to="/" replace />} />

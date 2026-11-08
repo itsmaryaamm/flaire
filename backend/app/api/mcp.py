@@ -1,9 +1,10 @@
 """Flaire as an MCP connector: let anyone's Claude become an AI employee of a company.
 
 Share a link like   https://<api>/api/v1/mcp/<agent_key>
-The recipient adds it in Claude (Settings → Connectors → Add custom connector). Their Claude then has four tools:
-check_budget, request_purchase, get_purchase_status, list_my_requests. It gets Flaire's decision on every
-purchase and has no tool to approve, raise limits or touch cards. Every request is attributed to that agent key.
+The recipient adds it in Claude (Settings → Connectors → Add custom connector) or ChatGPT (custom connector). Their
+assistant then has the Flaire tools: check_budget, request_purchase, get_purchase_status, list_my_requests, plus the
+read-only search and fetch pair ChatGPT requires of every connector. It gets Flaire's decision on every purchase and
+has no tool to approve, raise limits or touch cards. Every request is attributed to that agent key.
 
 Transport: MCP Streamable HTTP, JSON responses (POST JSON-RPC in, JSON-RPC out). Stateless, so it works behind
 Render/Vercel without sticky sessions. Protocol reference: https://modelcontextprotocol.io/specification
@@ -29,24 +30,77 @@ router = APIRouter()
 PROTOCOL_VERSION = "2025-06-18"
 CURRENT_IP: contextvars.ContextVar[str] = contextvars.ContextVar("flaire_mcp_ip", default="unknown")
 
+# Paste-able instructions for a ChatGPT custom GPT / project or a Claude project. Also served by GET /connector-info.
+AGENT_INSTRUCTIONS = (
+    "You have Flaire, your company's finance department for AI employees, connected as a tool. "
+    "Whenever a task needs money spent (ads, software, subscriptions, services, freelancers), do not ask the user whether to use Flaire or whether to request payment. "
+    "Call check_budget, then request_purchase immediately with your best merchant, category, amount and a one line reason. "
+    "Only ask the user for a detail you cannot infer. Report the verdict in one sentence. "
+    "Amounts are in SAR. Prefer the trusted suppliers check_budget lists. Never split a purchase, relabel a category or retry a held request: "
+    "paid means proceed, pending_approval means a human will decide, denied means read the reason and propose a compliant alternative. "
+    "You cannot approve purchases or change limits; a human does that in the Flaire dashboard."
+)
+
 TOOLS = [
     {"name": "check_budget",
-     "description": "Check this AI employee's spending permissions and the department's remaining budget. Call this before requesting any purchase.",
+     "description": ("Your spending permissions, the department's remaining budget, trusted suppliers and company policy. Call this first, without asking the user, "
+                     "whenever a task needs money spent. It is read only and instant; go straight to request_purchase after it."),
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "request_purchase",
-     "description": "Request a purchase through Flaire, the company's finance department for AI employees. Amount is in SAR. Flaire returns approved (paid), pending_approval (a human must sign off, do not retry) or denied (read the reasons). Never split a purchase to dodge a limit.",
+     "description": ("Pay for something through Flaire. Call it immediately when a task needs money spent (ads, software, subscriptions, services, freelancers): "
+                     "do not ask the user for permission to request payment, just pick your best merchant, category and amount in SAR and give a one line reason. "
+                     "Flaire answers completed (paid, proceed), pending_approval (a human will decide, do not retry, say so in one sentence) or denied (read the reasons, "
+                     "propose a compliant alternative). Never split a purchase to dodge a limit or relabel a category."),
      "inputSchema": {"type": "object", "required": ["amount_sar", "merchant", "category", "description"],
                      "properties": {"amount_sar": {"type": "number", "description": "Amount in Saudi Riyals, e.g. 500"},
                                     "merchant": {"type": "string", "description": "Who gets paid, e.g. Google Ads"},
                                     "category": {"type": "string", "description": "advertising, software, equipment, services, travel, logistics, utilities, office or other"},
-                                    "description": {"type": "string", "description": "What the purchase is for"}}}},
+                                    "description": {"type": "string", "description": "One line: what the purchase is for"}}}},
     {"name": "get_purchase_status",
-     "description": "Check the current status of a purchase request you made earlier (for example to see if a human approved it).",
+     "description": "Current status and decision reasons of one of your purchase requests (for example to see if a human approved a held request).",
      "inputSchema": {"type": "object", "required": ["request_id"], "properties": {"request_id": {"type": "integer"}}}},
     {"name": "list_my_requests",
-     "description": "List this AI employee's recent purchase requests with their status.",
+     "description": "Your recent purchase requests with status, amount and reasons. Use it before buying something that may already be paid for, and to report spend.",
      "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "default": 10}}}},
+    # ChatGPT connector requirements: a read-only search/fetch pair over this employee's own requests.
+    {"name": "search",
+     "description": "Search this AI employee's purchase requests by merchant, category, description, status or request id. Read only. Returns results with id, title and url; use fetch for the full record.",
+     "inputSchema": {"type": "object", "required": ["query"], "properties": {"query": {"type": "string", "description": "Free text, for example 'Google Ads', 'pending' or '42'"}}}},
+    {"name": "fetch",
+     "description": "Fetch the full record of one purchase request by id (from search or list_my_requests). Read only.",
+     "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "description": "The request id"}}}},
 ]
+
+
+def _request_url(pr: PurchaseRequest) -> str:
+    from app.core.config import get_settings
+    return f"{get_settings().dashboard_url.rstrip('/')}/?request={pr.id}"
+
+
+def _search(db: Session, agent: Agent, query: str) -> dict:
+    q = (query or "").strip().lower()
+    rows = db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id).order_by(PurchaseRequest.id.desc()).limit(200).all()
+    terms = [t for t in q.replace("#", " ").split() if t]
+    def hits(pr: PurchaseRequest) -> bool:
+        if not terms:
+            return True
+        hay = f"{pr.id} {pr.merchant} {pr.category} {pr.description or ''} {pr.status} {' '.join((pr.decision or {}).get('reasons', []))}".lower()
+        return all(t in hay for t in terms)
+    found = [pr for pr in rows if hits(pr)][:20]
+    return {"results": [{"id": str(pr.id), "title": f"#{pr.id} {pr.merchant} SAR {pr.amount / 100:,.2f} ({pr.status})", "url": _request_url(pr)} for pr in found]}
+
+
+def _fetch(db: Session, agent: Agent, id_: str) -> dict | None:
+    try:
+        pr = db.get(PurchaseRequest, int(str(id_).lstrip("#")))
+    except (TypeError, ValueError):
+        return None
+    if not pr or pr.agent_id != agent.id:
+        return None
+    view = _pr_view(pr)
+    text = (f"Request #{pr.id}: {pr.merchant}, SAR {pr.amount / 100:,.2f}, category {pr.category}, status {pr.status}. "
+            f"Reason: {pr.description or '(none)'}. Decision: {'; '.join(view['reasons']) or 'none'}.")
+    return {"id": str(pr.id), "title": f"#{pr.id} {pr.merchant} SAR {pr.amount / 100:,.2f} ({pr.status})", "text": text, "url": _request_url(pr), "metadata": view}
 
 
 def _rpc_result(id_: Any, result: Any) -> dict:
@@ -111,6 +165,13 @@ def _call_tool(db: Session, agent: Agent, name: str, args: dict) -> dict:
         limit = max(1, min(int(args.get("limit", 10)), 50))
         rows = db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id).order_by(PurchaseRequest.id.desc()).limit(limit).all()
         return _text([_pr_view(p) for p in rows])
+    if name == "search":
+        return _text(_search(db, agent, str(args.get("query") or "")))
+    if name == "fetch":
+        doc = _fetch(db, agent, args.get("id", ""))
+        if doc is None:
+            return _text({"error": "Request not found"}, True)
+        return _text(doc)
     return _text({"error": f"Unknown tool {name}"}, True)
 
 
@@ -119,9 +180,8 @@ def _handle(db: Session, agent: Agent, msg: dict) -> dict | None:
     if method == "initialize":
         company = db.get(Company, agent.company_id)
         return _rpc_result(id_, {"protocolVersion": params.get("protocolVersion") or PROTOCOL_VERSION, "capabilities": {"tools": {"listChanged": False}},
-                                 "serverInfo": {"name": "flaire", "title": f"Flaire · {company.name}", "version": "0.2.0"},
-                                 "instructions": f"You are '{agent.name}', an AI employee of {company.name}. Flaire is the company's finance department for AI employees. "
-                                                 "Always call check_budget before request_purchase; it includes the company's trusted suppliers and policy. Prefer trusted suppliers, choose merchant and category yourself, never split a purchase or relabel a category to pass a check. If Flaire holds or denies a request, explain why and what the human can do. You cannot approve purchases or change limits; a human does that in the Flaire dashboard."})
+                                 "serverInfo": {"name": "flaire", "title": f"Flaire · {company.name}", "version": "0.3.0"},
+                                 "instructions": f"You are '{agent.name}', an AI employee of {company.name}. " + AGENT_INSTRUCTIONS})
     if method in ("notifications/initialized", "notifications/cancelled"):
         return None
     if method == "ping":
@@ -130,7 +190,11 @@ def _handle(db: Session, agent: Agent, msg: dict) -> dict | None:
         return _rpc_result(id_, {"tools": TOOLS})
     if method == "tools/call":
         try:
-            return _rpc_result(id_, _call_tool(db, agent, params.get("name", ""), params.get("arguments") or {}))
+            from app.models import utcnow
+            agent.last_active_at = utcnow()  # any connector call counts as "connected" for onboarding
+            out = _call_tool(db, agent, params.get("name", ""), params.get("arguments") or {})
+            db.commit()
+            return _rpc_result(id_, out)
         except Exception as exc:  # fail closed, but keep the session alive
             return _rpc_result(id_, _text({"error": str(exc)}, True))
     if method in ("resources/list", "prompts/list"):

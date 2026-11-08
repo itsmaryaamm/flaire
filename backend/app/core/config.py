@@ -46,6 +46,13 @@ class Settings(BaseSettings):
     lithic_api_key: str | None = None
     lithic_base_url: str = "https://sandbox.lithic.com/v1"
     lithic_webhook_secret: str | None = None
+    # Flaire amounts are SAR; Lithic sandbox cards are USD. Halalas are converted to cents at this rate before the issuer is called.
+    fx_sar_usd: float = 3.75
+
+    # Platform owner console (GET /platform/*): comma separated emails that may read cross-company metrics.
+    platform_admin_emails: str = ""
+    # Mandatory 2FA for every member of a company. Applies to companies created from now on; existing ones keep their flag.
+    require_2fa_for_new_companies: bool = True
 
     # Approval notifications (optional). Without SMTP the notification is recorded in the ledger only.
     smtp_host: str | None = None
@@ -61,6 +68,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def platform_admin_list(self) -> list[str]:
+        return [e.strip().lower() for e in self.platform_admin_emails.split(",") if e.strip()]
 
     @property
     def claude_enabled(self) -> bool:

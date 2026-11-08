@@ -169,6 +169,8 @@ def twofa_disable(body: DisableIn, user: User = Depends(get_current_user), db: S
     if not verify_user_password(user, body.password) or not totp_ok(user, body.code):
         raise HTTPException(403, "Password or code is wrong.")
     company = db.get(Company, user.company_id)
+    if company.require_2fa_for_all:
+        raise HTTPException(409, "Your company requires two-factor authentication for every member. Turn that policy off first.")
     if company.require_2fa_for_approvers and user.role in ("owner", "finance"):
         raise HTTPException(409, "Your company requires 2FA for approvers. Turn that policy off first.")
     user.totp_enabled = False

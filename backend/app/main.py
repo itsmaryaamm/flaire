@@ -9,6 +9,7 @@ from app.api.auth_extra import router as auth_extra_router
 from app.api.finance import router as finance_router
 from app.api.mcp import router as mcp_router
 from app.api.oauth import router as oauth_router, well_known
+from app.api.platform import router as platform_router
 from app.api.policy import router as policy_router
 from app.api.routes import router
 from app.api.team import router as team_router
@@ -74,6 +75,7 @@ app.include_router(mcp_router, prefix="/api/v1")
 app.include_router(webhooks_router, prefix="/api/v1")
 app.include_router(oauth_router, prefix="/api/v1")
 app.include_router(policy_router, prefix="/api/v1")
+app.include_router(platform_router, prefix="/api/v1")
 app.include_router(well_known)
 
 

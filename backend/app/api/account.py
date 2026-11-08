@@ -21,8 +21,8 @@ from app.core import audit
 from app.core.db import get_db
 from app.core.security import generate_agent_key, get_current_user, verify_user_password
 from app.integrations.payments import get_adapter
-from app.models import (Agent, AgentRun, AuditEntry, Card, Company, Department, OAuthCode, OAuthToken, PasswordReset, PurchaseRequest, PushSubscription,
-                        Transaction, User)
+from app.models import (Agent, AgentRun, AuditEntry, Card, Company, Department, Notification, OAuthCode, OAuthToken, PasswordReset, PurchaseRequest,
+                        PushSubscription, Transaction, User)
 
 router = APIRouter()
 
@@ -75,8 +75,12 @@ def quickstart(body: QuickstartIn, user: User = Depends(get_current_user), db: S
         made["card"] = "SNB Business (simulated)"
     if body.create_agent and not db.query(Agent).filter(Agent.company_id == company.id).count():
         _, h, prefix = generate_agent_key()
-        db.add(Agent(company_id=company.id, department_id=dept.id, name="Marketing AI", role="marketing", api_key_hash=h, key_prefix=prefix,
-                     per_transaction_limit=100_000, monthly_limit=400_000, approval_threshold=100_000, allowed_categories=[], blocked_merchants=[]))
+        agent = Agent(company_id=company.id, department_id=dept.id, name="Marketing AI", role="marketing", api_key_hash=h, key_prefix=prefix,
+                      per_transaction_limit=100_000, monthly_limit=400_000, approval_threshold=100_000, allowed_categories=[], blocked_merchants=[], owner_user_id=user.id)
+        db.add(agent)
+        db.flush()
+        from app.cards import issue_card_for_agent
+        issue_card_for_agent(db, company, agent, actor=user.full_name)
         made["agent"] = "Marketing AI"
     company.onboarding_done = True
     audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="onboarding.quickstart", details=made)
@@ -90,16 +94,30 @@ def status(user: User = Depends(get_current_user), db: Session = Depends(get_db)
         return {"has_company": False, "steps": {}}
     cid = user.company_id
     company = db.get(Company, cid)
+    from app.core.config import get_settings
+    has_agent = db.query(Agent).filter(Agent.company_id == cid).count() > 0
+    oauth_connected = db.query(OAuthToken).filter(OAuthToken.company_id == cid, OAuthToken.revoked.is_(False)).count() > 0
+    agent_ran = db.query(AgentRun).filter(AgentRun.company_id == cid).count() > 0
+    agent_seen = db.query(Agent).filter(Agent.company_id == cid, Agent.last_active_at.isnot(None)).count() > 0  # any MCP or API call stamps last_active_at
+    first_purchase = db.query(PurchaseRequest).filter(PurchaseRequest.company_id == cid).count() > 0
     steps = {
         "company": True,
         "department": db.query(Department).filter(Department.company_id == cid).count() > 0,
-        "card": db.query(Card).filter(Card.company_id == cid).count() > 0,
-        "agent": db.query(Agent).filter(Agent.company_id == cid).count() > 0,
-        "claude_connected": db.query(OAuthToken).filter(OAuthToken.company_id == cid, OAuthToken.revoked.is_(False)).count() > 0,
-        "first_request": db.query(PurchaseRequest).filter(PurchaseRequest.company_id == cid).count() > 0,
+        "card": bool(company.lithic_api_key_enc or get_settings().lithic_api_key),       # Lithic key saved
+        "agent": has_agent,
+        "employee": has_agent,
+        "claude_connected": oauth_connected,
+        "connected": oauth_connected or agent_ran or agent_seen,          # an OAuth token, an agent run, or an MCP/API call
+        "first_request": first_purchase,
+        "first_purchase": first_purchase,
         "two_factor": bool(user.totp_enabled),
+        "twofa": bool(user.totp_enabled),
     }
-    return {"has_company": True, "onboarding_done": bool(company.onboarding_done), "steps": steps, "complete": all(steps.values())}
+    order = ("company", "twofa", "card", "employee", "connected", "first_purchase")
+    next_step = next((k for k in order if not steps[k]), None)
+    return {"has_company": True, "onboarding_done": bool(company.onboarding_done), "steps": steps, "complete": all(steps[k] for k in order), "next_step": next_step,
+            "twofa_required": bool(getattr(company, "require_2fa_for_all", False))}
+
 
 
 @router.post("/onboarding/dismiss", tags=["onboarding"])
@@ -118,11 +136,12 @@ class DeleteIn(BaseModel):
 def _delete_company(db: Session, cid: int) -> None:
     db.query(OAuthCode).filter(OAuthCode.company_id == cid).delete()
     db.query(OAuthToken).filter(OAuthToken.company_id == cid).delete()
+    db.query(Notification).filter(Notification.company_id == cid).delete()
     db.query(AgentRun).filter(AgentRun.company_id == cid).delete()
     db.query(Transaction).filter(Transaction.company_id == cid).delete()
     db.query(PurchaseRequest).filter(PurchaseRequest.company_id == cid).delete()
+    db.query(Agent).filter(Agent.company_id == cid).delete()   # agents point at their card, so they go first
     db.query(Card).filter(Card.company_id == cid).delete()
-    db.query(Agent).filter(Agent.company_id == cid).delete()
     db.query(Department).filter(Department.company_id == cid).delete()
     db.query(AuditEntry).filter(AuditEntry.company_id == cid).delete()
     for u in db.query(User).filter(User.company_id == cid).all():
@@ -150,6 +169,11 @@ def delete_account(body: DeleteIn, user: User = Depends(get_current_user), db: S
             db.query(OAuthToken).filter(OAuthToken.user_id == user.id).update({"revoked": True})
             db.query(PushSubscription).filter(PushSubscription.user_id == user.id).delete()
             db.query(PasswordReset).filter(PasswordReset.user_id == user.id).delete()
+            db.query(Notification).filter(Notification.user_id == user.id).delete()
+            fallback = db.query(User).filter(User.company_id == cid, User.role == "owner", User.id != user.id).order_by(User.id).first()
+            db.query(Agent).filter(Agent.owner_user_id == user.id).update({"owner_user_id": fallback.id if fallback else None})
+            db.query(Transaction).filter(Transaction.accountable_user_id == user.id).update({"accountable_user_id": fallback.id if fallback else None})
+            db.query(PurchaseRequest).filter(PurchaseRequest.approved_by_id == user.id).update({"approved_by_id": None})
             audit.record(db, cid, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="account.deleted", details={})
             db.query(User).filter(User.id == user.id).delete()
     else:

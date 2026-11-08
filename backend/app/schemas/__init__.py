@@ -35,6 +35,7 @@ class UserOut(BaseModel):
     full_name: str
     role: str
     totp_enabled: bool = False
+    is_platform_admin: bool = False
     model_config = {"from_attributes": True}
 
 
@@ -52,8 +53,10 @@ class CompanyOut(BaseModel):
     notify_threshold: int = 0
     lithic_configured: bool = False
     require_2fa_for_approvers: bool = False
+    require_2fa_for_all: bool = False
     require_change_approval: bool = False
     policy_version: int = 0
+    onboarding_done: bool = False
     created_at: UtcDatetime
     model_config = {"from_attributes": True}
 
@@ -75,6 +78,7 @@ class CompanyPatch(BaseModel):
     notify_threshold: int | None = Field(default=None, ge=0)
     lithic_api_key: str | None = None   # write-only; empty string removes
     require_2fa_for_approvers: bool | None = None
+    require_2fa_for_all: bool | None = None      # mandatory 2FA for every member; turning it off is a loosening
     require_change_approval: bool | None = None  # turning it off while on needs a second admin
     change_reason: str | None = Field(default=None, max_length=500)
 
@@ -153,6 +157,12 @@ class AgentPatch(BaseModel):
     change_reason: str | None = Field(default=None, max_length=500)
     cost_center_id: int | None = None
     gl_code: str | None = Field(default=None, max_length=40)
+    owner_user_id: int | None = None   # the accountable human: any active owner, admin, finance or dept_head
+
+
+class AgentOwner(BaseModel):
+    id: int
+    full_name: str
 
 
 class AgentOut(BaseModel):
@@ -176,6 +186,8 @@ class AgentOut(BaseModel):
     card: dict | None = None   # {id, provider, last4, status, available_balance, credit_limit}
     cost_center_id: int | None = None
     gl_code: str | None = None
+    owner_user_id: int | None = None
+    owner: AgentOwner | None = None
     created_at: UtcDatetime
 
 
@@ -279,7 +291,38 @@ class TransactionOut(BaseModel):
     period: str | None = None
     locked: bool = False
     agent_name: str | None = None
+    # What the issuer moved (Lithic sandbox cards are USD cents; mock cards record SAR at 1.0)
+    issuer_amount: int | None = None
+    issuer_currency: str = "USD"
+    fx_rate: float = 3.75
+    # The one human accountable for this money
+    accountable: Accountable | None = None
+    accountable_reason: str | None = None   # approved | auto_under_limits
+    approved_by: list[ApprovedBy] = []     # every human who approved a step of the request
     created_at: UtcDatetime
+
+
+class Accountable(BaseModel):
+    id: int
+    full_name: str
+    role: str | None = None
+
+
+# ---------- notifications ----------
+class NotificationOut(BaseModel):
+    id: int
+    type: str
+    title: str
+    body: str
+    request_id: int | None = None
+    url: str | None = None
+    created_at: UtcDatetime
+    read: bool = False
+
+
+class NotificationsReadIn(BaseModel):
+    ids: list[int] | None = None
+    all: bool = False
 
 
 # ---------- cards ----------

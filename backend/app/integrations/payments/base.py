@@ -13,6 +13,10 @@ class PaymentResult:
     provider_ref: str
     decline_reason: str | None = None
     raw: dict | None = None
+    # What the issuer saw. Flaire amounts are SAR halalas; a USD issuer gets cents (amount / fx_rate).
+    issuer_amount: int | None = None
+    issuer_currency: str | None = None
+    fx_rate: float | None = None
 
 
 class PaymentAdapter(Protocol):

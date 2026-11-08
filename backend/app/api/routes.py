@@ -15,13 +15,13 @@ from app.api.serializers import agent_out, department_out, purchase_out, transac
 from app.core import audit, guard
 from app.core.config import get_settings
 from app.core.db import get_db
-from app.core.security import (create_access_token, deny_read_only, generate_agent_key, get_current_agent, get_current_user, hash_password, require_approver,
-                               verify_password, visible_department_ids)
+from app.core.security import (APPROVER_ROLES, create_access_token, deny_read_only, generate_agent_key, get_current_agent, get_current_user, hash_password,
+                               is_platform_admin, require_approver, verify_password, visible_department_ids)
 from app.integrations.payments import MOCK_PROVIDERS, get_adapter
 from app.models import Agent, AgentRun, AuditEntry, Card, Company, Department, PurchaseRequest, Transaction, User
 from app.schemas import (AgentCreatedOut, AgentIn, AgentKeyOut, AgentOut, AgentPatch, ApprovalIn, AuditOut, AuthOut, CardIn, CardOut, CardPatch, CompanyOut,
-                         CompanyPatch, DepartmentIn, DepartmentOut, DepartmentPatch, KillSwitchIn, LoginIn, PurchaseIn, PurchaseRequestOut, RegisterIn, RunIn,
-                         RunOut, TopUpIn, TransactionOut, UserOut)
+                         CompanyPatch, DepartmentIn, DepartmentOut, DepartmentPatch, KillSwitchIn, LoginIn, NotificationOut, NotificationsReadIn, PurchaseIn,
+                         PurchaseRequestOut, RegisterIn, RunIn, RunOut, TopUpIn, TransactionOut, UserOut)
 from app.policy import GOVERNED_FIELDS, bump_policy, propose_or_apply
 from app.services import ensure_period, resolve_approval, set_kill_switch, submit_purchase_request
 
@@ -31,6 +31,12 @@ router = APIRouter()
 
 def company_of(user: User, db: Session) -> Company:
     return db.get(Company, user.company_id)
+
+
+def user_out(u: User) -> UserOut:
+    out = UserOut.model_validate(u)
+    out.is_platform_admin = is_platform_admin(u)
+    return out
 
 
 def company_out(c: Company) -> CompanyOut:
@@ -60,7 +66,7 @@ def register(body: RegisterIn, db: Session = Depends(get_db)):
     db.flush()
     audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="company.created", details={"name": company.name})
     db.commit()
-    return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=company_out(company))
+    return AuthOut(access_token=create_access_token(user.id, company.id), user=user_out(user), company=company_out(company))
 
 
 @router.post("/auth/login", response_model=AuthOut, tags=["auth"])
@@ -76,13 +82,13 @@ def login(body: LoginIn, request: Request, db: Session = Depends(get_db)):
         if not totp_ok(user, body.code):
             raise HTTPException(401, "Invalid authentication code")
     company = company_of(user, db)
-    return AuthOut(access_token=create_access_token(user.id, company.id), user=UserOut.model_validate(user), company=company_out(company))
+    return AuthOut(access_token=create_access_token(user.id, company.id), user=user_out(user), company=company_out(company))
 
 
 @router.get("/auth/me", tags=["auth"])
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     c = company_of(user, db) if user.company_id else None
-    return {"user": UserOut.model_validate(user), "company": company_out(c) if c else None, "needs_onboarding": c is None}
+    return {"user": user_out(user), "company": company_out(c) if c else None, "needs_onboarding": c is None}
 
 
 @router.get("/auth/config", tags=["auth"])
@@ -99,20 +105,35 @@ def get_company(user: User = Depends(get_current_user), db: Session = Depends(ge
 
 
 @router.patch("/company", response_model=CompanyOut, tags=["company"])
-def patch_company(body: CompanyPatch, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+def patch_company(body: CompanyPatch, request: Request, user: User = Depends(require_approver), db: Session = Depends(get_db)):
     c = company_of(user, db)
     if body.name:
         c.name = body.name
     if body.engine:
         c.engine = body.engine
         audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="engine.changed", details={"engine": body.engine})
-    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from", "notify_threshold", "require_2fa_for_approvers", "require_change_approval")}
+    sec = {k: v for k, v in body.model_dump(exclude_none=True).items() if k in ("require_password_on_approve", "two_person_threshold", "trusted_merchants", "new_merchant_review_from", "notify_threshold", "require_2fa_for_approvers", "require_2fa_for_all", "require_change_approval")}
     if sec.get("require_2fa_for_approvers") and not user.totp_enabled:
         raise HTTPException(409, "Enable 2FA on your own account first, otherwise you would lock yourself out of approvals.")
+    if sec.get("require_2fa_for_all") and not user.totp_enabled:
+        raise HTTPException(409, "Enable 2FA on your own account first, otherwise you would lock yourself out.")
     if body.lithic_api_key is not None:
         from app.core.crypto import encrypt
-        c.lithic_api_key_enc = encrypt(body.lithic_api_key.strip()) if body.lithic_api_key.strip() else None
-        audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="payments.lithic_key_set" if body.lithic_api_key.strip() else "payments.lithic_key_removed", details={})
+        key = body.lithic_api_key.strip()
+        c.lithic_api_key_enc = encrypt(key) if key else None
+        audit.record(db, c.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="payments.lithic_key_set" if key else "payments.lithic_key_removed", details={})
+        if key:
+            # A saved key means real cards: issue one for every employee that has none, detect sandbox vs production, enrol ASA.
+            from app.api.asa import on_lithic_key_saved
+            from app.api.oauth import base_url
+            db.flush()
+            setup = on_lithic_key_saved(db, c, base_url(request), user)
+            audit.record(db, c.id, actor_type="system", actor_id=None, actor_name="payments", event="payments.lithic_setup",
+                         details={"environment": setup["environment"], "cards_issued": setup["cards_issued"], "asa_enrolled": setup["asa"]["ok"], "asa_error": setup["asa"]["error"]})
+        else:
+            c.lithic_environment = None
+            c.lithic_asa_enrolled = False
+            c.lithic_asa_error = None
     if "trusted_merchants" in sec:
         sec["trusted_merchants"] = [m.strip() for m in sec["trusted_merchants"] if m.strip()][:200]
     # Security settings go through change control: tightening applies now, loosening may need a second admin (app.policy).
@@ -217,10 +238,11 @@ def create_agent(body: AgentIn, user: User = Depends(require_approver), db: Sess
     if fields.get("cost_center_id"):
         from app.api.finance import check_cost_center
         check_cost_center(db, user.company_id, fields["cost_center_id"])
-    a = Agent(company_id=user.company_id, api_key_hash=h, key_prefix=prefix, key_expires_at=(datetime.now(timezone.utc) + _td(days=days)) if days else None, **fields)
+    a = Agent(company_id=user.company_id, api_key_hash=h, key_prefix=prefix, key_expires_at=(datetime.now(timezone.utc) + _td(days=days)) if days else None,
+              owner_user_id=user.id, **fields)
     db.add(a)
     db.flush()
-    audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.created", details={"id": a.id, "name": a.name, "role": a.role})
+    audit.record(db, a.company_id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="agent.created", details={"id": a.id, "name": a.name, "role": a.role, "owner_user_id": user.id})
     from app.cards import issue_card_for_agent
     issue_card_for_agent(db, company_of(user, db), a, actor=user.full_name)
     db.commit()
@@ -248,6 +270,10 @@ def patch_agent(agent_id: int, body: AgentPatch, user: User = Depends(require_ap
         check_cost_center(db, user.company_id, changes["cost_center_id"])
     if "status" in changes and changes["status"] not in ("active", "paused"):
         raise HTTPException(422, "status must be active or paused")
+    if "owner_user_id" in changes:
+        owner = db.get(User, changes["owner_user_id"])
+        if not owner or owner.company_id != user.company_id or (owner.status or "active") != "active" or owner.role not in APPROVER_ROLES:
+            raise HTTPException(422, "owner_user_id must be an active owner, admin, finance or department head of this company")
     reason = changes.pop("change_reason", "") or ""
     governed = {k: changes.pop(k) for k in list(changes) if k in GOVERNED_FIELDS["agent"]}
     for k, v in changes.items():
@@ -261,6 +287,23 @@ def patch_agent(agent_id: int, body: AgentPatch, user: User = Depends(require_ap
     db.commit()
     if pending is not None:
         return JSONResponse(status_code=202, content={"pending_change_id": pending.id, "message": "Needs a second admin"})
+    db.refresh(a)
+    return agent_out(a)
+
+
+@router.post("/agents/{agent_id}/card", response_model=AgentOut, tags=["agents"])
+def issue_agent_card(agent_id: int, user: User = Depends(require_approver), db: Session = Depends(get_db)):
+    """Issue this employee's card now (Lithic when a key is configured, otherwise simulated). Idempotent: an existing card is returned as is."""
+    a = _agent(db, user, agent_id)
+    card = db.get(Card, a.card_id) if a.card_id else None
+    if card is None:
+        from app.cards import issue_card_for_agent
+        card = issue_card_for_agent(db, company_of(user, db), a, actor=user.full_name)
+        if card is None:
+            last = db.query(AuditEntry).filter(AuditEntry.company_id == a.company_id, AuditEntry.event == "card.issue_failed").order_by(AuditEntry.id.desc()).first()
+            db.commit()
+            raise HTTPException(502, f"Card could not be issued: {(last.details or {}).get('error') if last else 'issuer unavailable'}")
+    db.commit()
     db.refresh(a)
     return agent_out(a)
 
@@ -662,8 +705,42 @@ def revoke_connection(conn_id: int, user: User = Depends(require_approver), db: 
 
 @router.get("/connector-info", tags=["connector"])
 def connector_info(request: Request, user: User = Depends(get_current_user)):
+    from app.api.mcp import AGENT_INSTRUCTIONS
     from app.api.oauth import base_url
-    return {"url": f"{base_url(request)}/api/v1/mcp", "auth": "Sign in now", "steps": ["Claude → Settings → Connectors → Add custom connector", "Name: Flaire. URL: the one above. Authentication: Sign in now.", "Click Add, sign in with your Flaire email and password, choose which AI employee this Claude is."]}
+    mcp_url = f"{base_url(request)}/api/v1/mcp"
+    claude_steps = ["Open Claude, go to Settings, Connectors, then Add custom connector.",
+                    f"Name it Flaire and paste this URL: {mcp_url}. Leave authentication on Sign in.",
+                    "Click Add, sign in with your Flaire email and password, and choose which AI employee this Claude is.",
+                    "In a Claude project, paste the agent instructions below into the project instructions so it spends through Flaire without asking."]
+    chatgpt_steps = ["Open ChatGPT, go to Settings, Connectors (or Apps), then Create or Add a custom connector (Developer mode).",
+                     f"Name it Flaire and paste this MCP server URL: {mcp_url}. Authentication: OAuth. Sign in with your Flaire account and pick the AI employee.",
+                     "The connector exposes search and fetch plus the Flaire tools, so ChatGPT accepts it for chat and for custom GPTs.",
+                     "In a custom GPT or project, paste the agent instructions below into the instructions field."]
+    return {"mcp_url": mcp_url, "agent_instructions": AGENT_INSTRUCTIONS, "claude_steps": claude_steps, "chatgpt_steps": chatgpt_steps,
+            # kept for the current dashboard
+            "url": mcp_url, "auth": "Sign in now", "steps": claude_steps}
+
+
+# ====================================================== in-app notification feed
+@router.get("/notifications", response_model=list[NotificationOut], tags=["notifications"])
+def list_notifications(limit: int = Query(50, le=200), user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models import Notification
+    rows = db.query(Notification).filter(Notification.user_id == user.id).order_by(Notification.id.desc()).limit(limit).all()
+    return [NotificationOut(id=n.id, type=n.type, title=n.title, body=n.body or "", request_id=n.request_id, url=n.url, created_at=n.created_at, read=n.read_at is not None) for n in rows]
+
+
+@router.post("/notifications/read", tags=["notifications"])
+def read_notifications(body: NotificationsReadIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from app.models import Notification, utcnow
+    q = db.query(Notification).filter(Notification.user_id == user.id, Notification.read_at.is_(None))
+    if not body.all:
+        if not body.ids:
+            raise HTTPException(422, "Send ids or all=true")
+        q = q.filter(Notification.id.in_(body.ids))
+    n = q.update({"read_at": utcnow()}, synchronize_session=False)
+    db.commit()
+    unread = db.query(Notification).filter(Notification.user_id == user.id, Notification.read_at.is_(None)).count()
+    return {"ok": True, "marked": n, "unread": unread}
 
 
 # ====================================================== Flaire fees

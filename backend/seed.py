@@ -7,6 +7,7 @@ Login: demo@flaire.sa / demo1234
 """
 import sys
 
+from app.cards import issue_card_for_agent
 from app.core import audit
 from app.core.db import Base, SessionLocal, engine, init_db
 from app.core.security import generate_agent_key, hash_password
@@ -27,7 +28,9 @@ def seed(reset: bool = False) -> dict:
             print("Demo data already present. Use --reset to start over.")
             return {}
 
-        company = Company(name="Nawah Tech", engine="native", trusted_merchants=["Google Ads", "Meta Ads", "Canva", "Notion", "Slack", "AWS", "Aramex", "Jarir Bookstore"])
+        # Demo company: mandatory 2FA is off so the demo owner (no TOTP) can log in and use everything.
+        company = Company(name="Nawah Tech", onboarding_done=True, engine="native", trusted_merchants=["Google Ads", "Meta Ads", "Canva", "Notion", "Slack", "AWS", "Aramex", "Jarir Bookstore"],
+                          require_2fa_for_all=False)
         db.add(company)
         db.flush()
         owner = User(company_id=company.id, email=DEMO_EMAIL, full_name="Sara Al-Otaibi", password_hash=hash_password(DEMO_PASSWORD), role="owner")
@@ -76,9 +79,10 @@ def seed(reset: bool = False) -> dict:
         ]
         for spec in agent_specs:
             plain, h, prefix = generate_agent_key()
-            a = Agent(company_id=company.id, department_id=depts[spec.pop("dept")].id, api_key_hash=h, key_prefix=prefix, **spec)
+            a = Agent(company_id=company.id, department_id=depts[spec.pop("dept")].id, api_key_hash=h, key_prefix=prefix, owner_user_id=owner.id, **spec)
             db.add(a)
             db.flush()
+            issue_card_for_agent(db, company, a, actor=owner.full_name)  # one simulated card per AI employee
             keys[a.name] = plain
             audit.record(db, company.id, actor_type="user", actor_id=owner.id, actor_name=owner.full_name, event="agent.created", details={"id": a.id, "name": a.name})
 

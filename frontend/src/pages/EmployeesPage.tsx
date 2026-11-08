@@ -11,16 +11,19 @@ import { EmptyState } from '../components/EmptyState'
 import { PageLoader } from '../components/Spinner'
 import { ErrorNote } from '../components/ErrorNote'
 import { EmployeeCard } from '../components/employees/EmployeeCard'
+import { useLithicConfigured } from '../components/employees/CardTile'
 import { useT } from '../lib/i18n'
 
 export default function EmployeesPage() {
   const t = useT()
   const agents = useFetch(() => api.get<Agent[]>('/agents').then((r) => r.data), [])
   const departments = useFetch(() => api.get<Department[]>('/departments').then((r) => r.data), [])
+  const lithicConfigured = useLithicConfigured()
   const [createOpen, setCreateOpen] = useState(false)
   const [created, setCreated] = useState<{ key: string; name: string } | null>(null)
 
   const list = agents.data ?? []
+  const refresh = () => void agents.refetch()
   const newButton = (
     <button className="btn-primary" onClick={() => setCreateOpen(true)}>
       <Plus className="h-4 w-4" /> {t('employees.new')}
@@ -42,7 +45,7 @@ export default function EmployeesPage() {
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {list.map((a) => (
-            <EmployeeCard key={a.id} agent={a} />
+            <EmployeeCard key={a.id} agent={a} lithicConfigured={lithicConfigured} onChanged={refresh} />
           ))}
         </div>
       )}
@@ -53,7 +56,7 @@ export default function EmployeesPage() {
           onCancel={() => setCreateOpen(false)}
           onSaved={() => {
             setCreateOpen(false)
-            void agents.refetch()
+            refresh()
           }}
           onCreated={(agent, key) => setCreated({ key, name: agent.name })}
         />

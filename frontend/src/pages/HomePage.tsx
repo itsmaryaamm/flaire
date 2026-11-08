@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { useFetch } from '../lib/useFetch'
@@ -21,11 +22,17 @@ function thisMonth(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-/** Home serves both views. My view: what this person can act on. Admin view: the whole company. The header toggle decides. */
+/**
+ * Home. Desktop serves both views (My view: what this person can act on; Admin view: the whole company).
+ * Phone is the simplest app: company and kill switch, Needs you, This month, Recent activity.
+ * A `?decide=<request id>` in the URL (push notification tap) opens the decision sheet for that request.
+ */
 export default function HomePage() {
   const { company } = useAuth()
-  const { mode, canSwitch } = useView()
+  const { mode, canSwitch, phone } = useView()
   const admin = mode === 'admin'
+  const [search, setSearch] = useSearchParams()
+  const decideId = Number(search.get('decide')) || null
 
   const summary = useFetch(() => api.get<DashboardSummary>('/dashboard/summary').then((r) => r.data), [])
   const approvals = useFetch(() => (admin ? api.get<PurchaseRequest[]>('/approvals').then((r) => r.data) : Promise.resolve([])), [admin])
@@ -79,25 +86,57 @@ export default function HomePage() {
     [approvals.setData, myView.setData, refreshAll], // eslint-disable-line react-hooks/exhaustive-deps
   )
 
+  const clearDecide = useCallback(() => {
+    if (!search.has('decide')) return
+    const next = new URLSearchParams(search)
+    next.delete('decide')
+    setSearch(next, { replace: true })
+  }, [search, setSearch])
+
   const totals = summary.data?.totals
-  const recent = (summary.data?.recent_requests ?? []).slice(0, 6)
+  const recent = (summary.data?.recent_requests ?? []).slice(0, phone ? 5 : 6)
   const listError = admin ? approvals.error && !approvals.data : myView.error && !myView.data
   const error = listError ? (admin ? approvals.error : myView.error) : summary.error && !summary.data ? summary.error : null
 
   const needsItems = admin ? (approvals.data ?? []) : (myView.data?.needs_me ?? [])
   const needsLoading = admin ? approvals.loading && !approvals.data : myView.loading && !myView.data
 
+  const header = (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-xl md:text-2xl font-extrabold tracking-tightest truncate">{company?.name ?? 'Flaire'}</h1>
+        {company?.kill_switch && company.kill_switch_reason && <div className="text-xs text-danger truncate mt-0.5">{company.kill_switch_reason}</div>}
+      </div>
+      <KillSwitchPill />
+    </div>
+  )
+
+  const needsYou = (
+    <NeedsYou
+      items={needsItems}
+      loading={needsLoading}
+      killSwitch={!!company?.kill_switch}
+      onDecided={onDecided}
+      decideId={decideId}
+      onDecideHandled={clearDecide}
+    />
+  )
+
+  if (phone) {
+    return (
+      <div className="space-y-5">
+        {header}
+        {error && <ErrorNote message={error} />}
+        {needsYou}
+        <MonthCard spent={totals?.spent_this_period ?? 0} budget={totals?.budget_total ?? 0} fees={fees.data} />
+        <RecentActivity items={recent} />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-xl md:text-2xl font-extrabold tracking-tightest truncate">{company?.name ?? 'Flaire'}</h1>
-          {company?.kill_switch && company.kill_switch_reason && (
-            <div className="text-xs text-danger truncate mt-0.5">{company.kill_switch_reason}</div>
-          )}
-        </div>
-        <KillSwitchPill />
-      </div>
+      {header}
 
       {admin && <GettingStartedCard />}
       {error && <ErrorNote message={error} />}
@@ -105,7 +144,7 @@ export default function HomePage() {
 
       <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(360px,0.85fr)] gap-5 items-start">
         <div className="space-y-5 min-w-0">
-          <NeedsYou items={needsItems} loading={needsLoading} killSwitch={!!company?.kill_switch} onDecided={onDecided} />
+          {needsYou}
           {!admin && myView.data && <MyViewPanel view={myView.data} />}
           {admin && adminView.data && <AdminBlock view={adminView.data} />}
           <MonthCard spent={totals?.spent_this_period ?? 0} budget={totals?.budget_total ?? 0} fees={fees.data} />

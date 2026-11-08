@@ -62,6 +62,43 @@ export function isProviderDisabledError(err: unknown): boolean {
   return /provider.*not enabled|unsupported provider|not enabled/i.test(msg)
 }
 
+/** What a Supabase redirect carried in the URL: PKCE code, hash tokens, a link type, or an error. */
+export interface AuthRedirectParams {
+  code: string | null
+  /** True when the hash holds access_token / refresh_token (implicit flow links). */
+  hasHashTokens: boolean
+  /** signup, recovery, magiclink, invite, email_change or null. */
+  type: string | null
+  returnTo: string | null
+  error: string | null
+  errorCode: string | null
+  errorDescription: string | null
+}
+
+/** Reads both the query string and the hash fragment of the current URL. */
+export function readAuthRedirect(href: string = window.location.href): AuthRedirectParams {
+  const url = new URL(href)
+  const q = url.searchParams
+  const hashRaw = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash
+  const h = new URLSearchParams(hashRaw)
+  const pick = (k: string) => h.get(k) ?? q.get(k)
+  return {
+    code: q.get('code'),
+    hasHashTokens: !!(h.get('access_token') || h.get('refresh_token')),
+    type: pick('type'),
+    returnTo: q.get('returnTo'),
+    error: pick('error'),
+    errorCode: pick('error_code'),
+    errorDescription: pick('error_description'),
+  }
+}
+
+/** True when the error says the link was already used or is too old. */
+export function isExpiredLinkError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : ''
+  return /expired|invalid|already been used|otp_expired|code verifier|both auth code and code verifier/i.test(msg)
+}
+
 /** Friendlier wording for the most common Supabase auth errors. */
 export function supabaseErrorMessage(err: unknown): string {
   const msg = err instanceof Error ? err.message : typeof err === 'string' ? err : 'Something went wrong.'

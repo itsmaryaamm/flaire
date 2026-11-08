@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
+import type { LoginResult } from '../lib/auth'
 import { errorMessage, isNetworkError, wakeServer } from '../lib/api'
 import { useT } from '../lib/i18n'
 import axios from 'axios'
@@ -26,11 +27,6 @@ export default function LoginPage() {
   const [waking, setWaking] = useState<number | null>(null)
   const builtin = provider === 'builtin'
 
-  // The demo account only exists on the built-in auth backend.
-  useEffect(() => {
-    if (builtin) setEmail((e) => e || 'demo@flaire.sa')
-  }, [builtin])
-
   // Warm the backend as soon as the page opens, so the first sign-in does not hit a sleeping server.
   useEffect(() => {
     let cancelled = false
@@ -46,7 +42,7 @@ export default function LoginPage() {
     setError(null)
     const otp = needsCode ? code.trim() : undefined
     try {
-      let result: { needs_onboarding: boolean }
+      let result: LoginResult
       try {
         result = await login(email.trim(), password, otp)
       } catch (err) {
@@ -57,9 +53,9 @@ export default function LoginPage() {
         if (!ok) throw err
         result = await login(email.trim(), password, otp)
       }
-      // An invite link must win over the walkthrough: accepting it is what gives the account a company.
+      // An invite link must win over setup: accepting it is what gives the account a company.
       if (returnTo.startsWith('/invite/')) navigate(returnTo, { replace: true })
-      else if (result.needs_onboarding) navigate('/welcome', { replace: true })
+      else if (result.needs_setup) navigate('/setup', { replace: true })
       else navigate(returnTo, { replace: true })
     } catch (err) {
       const detail = axios.isAxiosError(err) ? (err.response?.data as { detail?: unknown } | undefined)?.detail : undefined
@@ -136,7 +132,7 @@ export default function LoginPage() {
         </button>
       </form>
 
-      {provider === 'supabase' && <GoogleButton />}
+      <GoogleButton returnTo={returnTo !== '/' ? returnTo : undefined} />
 
       {builtin && (
         <div className="mt-5 rounded-card border border-dashed border-line-strong bg-lavender px-3.5 py-3 text-xs text-neutral-600">
@@ -159,8 +155,8 @@ export default function LoginPage() {
 
       <p className="text-sm text-neutral-500 mt-6">
         {t('auth.newHere')}{' '}
-        <Link to="/register" className="text-brand font-semibold hover:underline">
-          {t('auth.createCompany')}
+        <Link to={params.get('email') ? `/register?${params.toString()}` : '/register'} className="text-brand font-semibold hover:underline">
+          {t('auth.createAccount')}
         </Link>
       </p>
     </AuthShell>

@@ -12,6 +12,7 @@ import { Modal } from '../components/Modal'
 import { ApiKeyReveal } from '../components/ApiKeyReveal'
 import { EmployeeChat } from '../components/employees/EmployeeChat'
 import { AdvancedSection, CardAndLimits, ConnectedClaudes, ProfileCard } from '../components/employees/EmployeeSidebar'
+import { useLithicConfigured } from '../components/employees/CardTile'
 
 /** One employee: profile, card, limits and connections on the left; chat on the right. Stacked on phones. */
 export default function EmployeeDetailPage() {
@@ -24,6 +25,7 @@ export default function EmployeeDetailPage() {
 
   const agent = useFetch(() => api.get<Agent>(`/agents/${agentId}`).then((r) => r.data), [agentId])
   const departments = useFetch(() => api.get<Department[]>('/departments').then((r) => r.data), [])
+  const lithicConfigured = useLithicConfigured()
   const [revealKey, setRevealKey] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -74,7 +76,7 @@ export default function EmployeeDetailPage() {
       <div className="grid lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-5 items-start">
         <div className="space-y-4 min-w-0">
           <ProfileCard agent={a} onChanged={refresh} onDelete={() => setDeleting(true)} />
-          <CardAndLimits agent={a} departments={departments.data ?? []} onChanged={refresh} />
+          <CardAndLimits agent={a} departments={departments.data ?? []} lithicConfigured={lithicConfigured} onChanged={refresh} />
           <ConnectedClaudes agentId={a.id} />
           <AdvancedSection
             agent={a}

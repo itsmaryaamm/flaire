@@ -60,9 +60,14 @@ api.interceptors.response.use(
         window.location.assign('/login')
       }
     } else if (status === 403 && detail === 'onboarding_required') {
-      // Signed in but no company yet: send them to the walkthrough, this is not a logout.
-      if (!window.location.pathname.startsWith('/welcome')) {
-        window.location.assign('/welcome')
+      // Signed in but no company yet: send them to the setup wizard, this is not a logout.
+      if (!window.location.pathname.startsWith('/setup')) {
+        window.location.assign('/setup')
+      }
+    } else if (status === 403 && detail === 'totp_required') {
+      // The account has no 2FA yet and the API requires it: the wizard's 2FA step turns it on. Never loop when already there.
+      if (!window.location.pathname.startsWith('/setup')) {
+        window.location.assign('/setup?step=twofa')
       }
     }
     return Promise.reject(error)

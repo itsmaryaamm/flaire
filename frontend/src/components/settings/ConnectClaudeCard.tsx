@@ -3,17 +3,16 @@ import { Plug, Trash2 } from 'lucide-react'
 import { api, errorMessage } from '../../lib/api'
 import { useFetch, formatDate, timeAgo } from '../../lib/useFetch'
 import { useToast } from '../../lib/toast'
-import type { Connection, ConnectorInfo } from '../../types'
-import { CopyBox } from '../CopyBox'
+import type { Connection } from '../../types'
+import { ConnectAiPanel } from '../ConnectAiPanel'
 import { ErrorNote } from '../ErrorNote'
 import { Spinner } from '../Spinner'
 import { useT } from '../../lib/i18n'
 
-/** Settings card: the MCP connector URL plus the list of connected Claude clients. */
+/** Settings card: how to connect Claude or ChatGPT to this company's Flaire, plus the list of connected AI clients. */
 export function ConnectClaudeCard() {
   const toast = useToast()
   const t = useT()
-  const info = useFetch(() => api.get<ConnectorInfo>('/connector-info').then((r) => r.data), [])
   const connections = useFetch(() => api.get<Connection[]>('/connections').then((r) => r.data), [])
   const [revoking, setRevoking] = useState<number | null>(null)
 
@@ -37,39 +36,15 @@ export function ConnectClaudeCard() {
     <section id="connect" className="card-lg p-5 scroll-mt-20">
       <div className="flex items-center gap-2">
         <Plug className="h-4 w-4 text-brand" />
-        <h3 className="font-bold">{t('settings.connectClaude')}</h3>
+        <h3 className="font-bold">{t('settings.connectAi')}</h3>
       </div>
-      <p className="text-xs text-neutral-500 mt-0.5 mb-3">{t('settings.connectHint')}</p>
+      <p className="text-xs text-neutral-500 mt-0.5 mb-4">{t('settings.connectAiHint')}</p>
 
-      {info.loading && !info.data ? (
-        <div className="flex items-center gap-2 text-sm text-neutral-500 py-2">
-          <Spinner /> {t('settings.loadingConnector')}
-        </div>
-      ) : info.error && !info.data ? (
-        <ErrorNote message={info.error} />
-      ) : info.data ? (
-        <div className="space-y-3">
-          <div>
-            <div className="label">{t('settings.connectorUrl')}</div>
-            <CopyBox value={info.data.url} />
-          </div>
-          <ol className="space-y-1.5 text-sm text-neutral-600">
-            {info.data.steps.map((s, i) => (
-              <li key={i} className="flex gap-2.5">
-                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-light text-brand text-[11px] font-bold tnum">{i + 1}</span>
-                <span>{s}</span>
-              </li>
-            ))}
-          </ol>
-          <div className="rounded-input border border-line bg-lavender px-3 py-2 text-xs text-neutral-600">
-            {t('settings.authChoose')} <strong className="text-ink">{t('settings.signInNow')}</strong>. {t('settings.claudeOpensSignIn')}
-          </div>
-        </div>
-      ) : null}
+      <ConnectAiPanel />
 
       <div className="mt-5 pt-4 border-t border-line">
         <div className="flex items-center justify-between mb-2">
-          <h4 className="text-sm font-bold">{t('settings.connectedClaudes')}</h4>
+          <h4 className="text-sm font-bold">{t('settings.connectedClients')}</h4>
           <button className="btn-ghost text-xs" onClick={() => connections.refetch()} disabled={connections.loading}>
             {connections.loading && <Spinner className="h-3.5 w-3.5" />} {t('common.refresh')}
           </button>
@@ -77,7 +52,7 @@ export function ConnectClaudeCard() {
         {connections.error && !connections.data ? (
           <ErrorNote message={connections.error} />
         ) : list.length === 0 ? (
-          <div className="rounded-input border border-dashed border-line-strong px-3 py-4 text-center text-sm text-neutral-500">{t('settings.noClaudeYet')}</div>
+          <div className="rounded-input border border-dashed border-line-strong px-3 py-4 text-center text-sm text-neutral-500">{t('settings.noClientYet')}</div>
         ) : (
           <div className="overflow-x-auto -mx-5 px-5">
             <table className="w-full min-w-[560px]">

@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
-from app.models import Agent, Card, Department, PurchaseRequest, Transaction
-from app.schemas import AgentOut, ApprovedBy, DepartmentOut, PurchaseRequestOut, TransactionOut
+from app.models import Agent, Card, Department, PurchaseRequest, Transaction, User
+from app.schemas import Accountable, AgentOut, AgentOwner, ApprovedBy, DepartmentOut, PurchaseRequestOut, TransactionOut
 
 
 def department_out(d: Department) -> DepartmentOut:
@@ -19,7 +19,14 @@ def agent_out(a: Agent) -> AgentOut:
         c = sess.get(Card, a.card_id) if sess else None
         if c:
             card = {"id": c.id, "provider": c.provider, "last4": c.last4, "status": c.status, "available_balance": c.available_balance, "credit_limit": c.credit_limit}
-    return AgentOut(card=card,id=a.id, name=a.name, role=a.role, department_id=a.department_id, department_name=a.department.name if a.department else "",
+    owner = None
+    if a.owner_user_id:
+        from sqlalchemy.orm import object_session
+        sess = object_session(a)
+        u = sess.get(User, a.owner_user_id) if sess else None
+        if u:
+            owner = AgentOwner(id=u.id, full_name=u.full_name)
+    return AgentOut(card=card, owner=owner, owner_user_id=a.owner_user_id, id=a.id, name=a.name, role=a.role, department_id=a.department_id, department_name=a.department.name if a.department else "",
                     status=a.status, per_transaction_limit=a.per_transaction_limit, monthly_limit=a.monthly_limit, spent_this_period=a.spent_this_period,
                     approval_threshold=a.approval_threshold, allowed_categories=list(a.allowed_categories or []), blocked_merchants=list(a.blocked_merchants or []),
                     max_requests_per_hour=a.max_requests_per_hour, max_requests_per_day=a.max_requests_per_day or 50, key_prefix=a.key_prefix, last_active_at=a.last_active_at, key_expires_at=a.key_expires_at, created_at=a.created_at,
@@ -49,7 +56,14 @@ def transaction_out(t: Transaction, db: Session | None = None) -> TransactionOut
     from sqlalchemy.orm import object_session
     sess = object_session(t)
     pr = sess.get(PurchaseRequest, t.purchase_request_id) if sess else None
-    return TransactionOut(id=t.id, purchase_request_id=t.purchase_request_id, card_id=t.card_id, card_label=label, provider=t.provider, provider_ref=t.provider_ref,
+    acc = sess.get(User, t.accountable_user_id) if sess and t.accountable_user_id else None
+    approvals = [_approved_by(a) for a in (pr.decision or {}).get("approvals", [])] if pr else []
+    if pr and pr.approved_by and not any(x.id == pr.approved_by.id for x in approvals):
+        approvals.append(ApprovedBy(id=pr.approved_by.id, full_name=pr.approved_by.full_name, role=pr.approved_by.role))
+    return TransactionOut(issuer_amount=t.issuer_amount if t.issuer_amount is not None else t.amount, issuer_currency=t.issuer_currency or t.currency,
+                          fx_rate=t.fx_rate if t.fx_rate is not None else 1.0,
+                          accountable=Accountable(id=acc.id, full_name=acc.full_name, role=acc.role) if acc else None, accountable_reason=t.accountable_reason,
+                          approved_by=approvals, id=t.id, purchase_request_id=t.purchase_request_id, card_id=t.card_id, card_label=label, provider=t.provider, provider_ref=t.provider_ref,
                           amount=t.amount, currency=t.currency, merchant=t.merchant, status=t.status, decline_reason=t.decline_reason,
                           fee=t.fee or 0, fee_rate_bps=t.fee_rate_bps or 0, vat_amount=t.vat_amount or 0, vat_rate_bps=t.vat_rate_bps or 0,
                           cost_center_id=t.cost_center_id, gl_code=t.gl_code, period=t.period, locked=bool(t.locked),

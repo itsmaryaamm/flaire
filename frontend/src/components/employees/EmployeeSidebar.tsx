@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Bot, ChevronDown, ChevronRight, Pause, Play, Plug, RefreshCw, SlidersHorizontal, TerminalSquare, Trash2 } from 'lucide-react'
+import { Bot, ChevronDown, ChevronRight, Pause, Play, Plug, RefreshCw, SlidersHorizontal, TerminalSquare, Trash2, UserCheck } from 'lucide-react'
 import { api, API_URL, errorMessage } from '../../lib/api'
+import { useAuth } from '../../lib/auth'
 import { useFetch, timeAgo, formatDate } from '../../lib/useFetch'
 import { useToast } from '../../lib/toast'
 import { sar } from '../../lib/money'
-import type { Agent, Connection, Department } from '../../types'
+import { TEAM_ADMIN_ROLES } from '../../types'
+import type { Agent, Connection, Department, Member, Role } from '../../types'
 import { StatusPill } from '../StatusPill'
 import { Spinner } from '../Spinner'
 import { Modal } from '../Modal'
@@ -14,7 +16,60 @@ import { ErrorNote } from '../ErrorNote'
 import { CardTile } from './CardTile'
 import { useT } from '../../lib/i18n'
 
-/** Profile: name, role, status with Pause / Resume. */
+/** "Accountable: <owner>". Owners and admins pick another team member; everyone else reads it. PATCH owner_user_id. */
+function AccountableRow({ agent: a, onChanged }: { agent: Agent; onChanged: () => void }) {
+  const { user } = useAuth()
+  const toast = useToast()
+  const t = useT()
+  const canEdit = TEAM_ADMIN_ROLES.includes(String(user?.role) as Role)
+  const members = useFetch(() => (canEdit ? api.get<Member[]>('/team/members').then((r) => r.data) : Promise.resolve([])), [canEdit])
+  const [busy, setBusy] = useState(false)
+  const options = (members.data ?? []).filter((m) => m.status === 'active' || m.id === a.owner?.id)
+
+  const change = async (value: string) => {
+    const id = Number(value)
+    if (!id || id === a.owner?.id) return
+    setBusy(true)
+    try {
+      await api.patch(`/agents/${a.id}`, { owner_user_id: id })
+      const name = options.find((m) => m.id === id)?.full_name ?? ''
+      toast.success(t('employees.accountableUpdated', { name }))
+      onChanged()
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-sm">
+      <UserCheck className="h-4 w-4 text-brand shrink-0" />
+      <span className="text-xs text-neutral-500 shrink-0">{t('employees.accountable')}</span>
+      {canEdit && options.length > 0 ? (
+        <select
+          className="input h-9 py-0 text-sm flex-1 min-w-0"
+          value={a.owner?.id ?? ''}
+          onChange={(e) => void change(e.target.value)}
+          disabled={busy}
+          aria-label={t('employees.accountable')}
+        >
+          {!a.owner && <option value="">{t('employees.nobodyYet')}</option>}
+          {options.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.full_name} ({t(`role.${m.role}`)})
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className="font-semibold truncate">{a.owner?.full_name ?? t('employees.nobodyYet')}</span>
+      )}
+      {busy && <Spinner className="h-3.5 w-3.5" />}
+    </div>
+  )
+}
+
+/** Profile: name, role, status with Pause / Resume, and who answers for it. */
 export function ProfileCard({ agent: a, onChanged, onDelete }: { agent: Agent; onChanged: () => void; onDelete: () => void }) {
   const toast = useToast()
   const t = useT()
@@ -55,6 +110,9 @@ export function ProfileCard({ agent: a, onChanged, onDelete }: { agent: Agent; o
           <div className="font-semibold">{timeAgo(a.last_active_at)}</div>
         </div>
       </div>
+      <div className="mt-4 pt-4 border-t border-line">
+        <AccountableRow agent={a} onChanged={onChanged} />
+      </div>
       <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-line">
         <button className="btn-secondary text-xs" onClick={toggle} disabled={busy}>
           {busy ? <Spinner className="h-3.5 w-3.5" /> : a.status === 'active' ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
@@ -69,13 +127,13 @@ export function ProfileCard({ agent: a, onChanged, onDelete }: { agent: Agent; o
 }
 
 /** Card tile plus the limits editor (limits-only AgentForm in a modal). */
-export function CardAndLimits({ agent: a, departments, onChanged }: { agent: Agent; departments: Department[]; onChanged: () => void }) {
+export function CardAndLimits({ agent: a, departments, lithicConfigured, onChanged }: { agent: Agent; departments: Department[]; lithicConfigured: boolean; onChanged: () => void }) {
   const toast = useToast()
   const t = useT()
   const [editOpen, setEditOpen] = useState(false)
   return (
     <div className="card-lg p-5 space-y-4">
-      <CardTile card={a.card} />
+      <CardTile agent={a} lithicConfigured={lithicConfigured} onChanged={onChanged} />
       <div>
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-sm font-bold">{t('employees.limits')}</h3>

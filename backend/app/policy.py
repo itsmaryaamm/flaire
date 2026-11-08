@@ -24,7 +24,7 @@ from app.core.audit import canonical_json
 from app.models import Agent, ApprovalRule, Company, Department, PolicyChange, PolicyVersion, User, utcnow
 
 COMPANY_POLICY_FIELDS = ("two_person_threshold", "require_password_on_approve", "trusted_merchants", "new_merchant_review_from", "notify_threshold",
-                         "require_2fa_for_approvers", "fee_rate_bps", "kill_switch", "require_change_approval")
+                         "require_2fa_for_approvers", "require_2fa_for_all", "fee_rate_bps", "kill_switch", "require_change_approval")
 AGENT_POLICY_FIELDS = ("per_transaction_limit", "monthly_limit", "approval_threshold", "allowed_categories", "blocked_merchants", "max_requests_per_hour",
                        "max_requests_per_day", "status")
 DEPARTMENT_POLICY_FIELDS = ("monthly_budget", "spending_paused")
@@ -33,7 +33,7 @@ RULE_POLICY_FIELDS = ("department_id", "min_amount", "steps", "active")
 # Fields governed by change approval, by target type. Anything not listed here (names, roles, engine, key expiry) applies directly.
 GOVERNED_FIELDS = {
     "company": ("two_person_threshold", "require_password_on_approve", "trusted_merchants", "new_merchant_review_from", "notify_threshold",
-                "require_2fa_for_approvers", "require_change_approval"),
+                "require_2fa_for_approvers", "require_2fa_for_all", "require_change_approval"),
     "agent": AGENT_POLICY_FIELDS,
     "department": DEPARTMENT_POLICY_FIELDS,
     "approval_rule": RULE_POLICY_FIELDS,
@@ -54,6 +54,7 @@ def snapshot_policy(db: Session, company: Company) -> dict:
             "new_merchant_review_from": company.new_merchant_review_from,
             "notify_threshold": company.notify_threshold,
             "require_2fa_for_approvers": bool(company.require_2fa_for_approvers),
+            "require_2fa_for_all": bool(company.require_2fa_for_all),
             "fee_rate_bps": company.fee_rate_bps,
             "kill_switch": bool(company.kill_switch),
         },
@@ -177,7 +178,7 @@ def is_loosening(target_type: str, field: str, old: Any, new: Any) -> bool:
             if (old or 0) == 0:
                 return False  # 0 disables review; any positive amount enables it
             return new == 0 or (new or 0) > (old or 0)
-        if field in ("require_password_on_approve", "require_2fa_for_approvers", "require_change_approval"):
+        if field in ("require_password_on_approve", "require_2fa_for_approvers", "require_2fa_for_all", "require_change_approval"):
             return new is False
         if field == "trusted_merchants":
             return bool(_as_set(new) - _as_set(old))  # trusting a new supplier skips its category checks
@@ -259,6 +260,8 @@ def propose_or_apply(db: Session, company: Company, user: User, target_type: str
         db.flush()
         audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name, event="policy.change_proposed",
                      details={"change_id": pending.id, "target_type": target_type, "target_id": target_id, "changes": changes, "reason": reason})
+        from app.core.notify import notify_policy_change
+        notify_policy_change(db, company, pending, user)
         return False, pending
     _apply_changes(target_obj, changes)
     db.flush()

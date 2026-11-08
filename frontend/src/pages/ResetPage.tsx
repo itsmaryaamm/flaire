@@ -6,6 +6,7 @@ import { api, errorMessage } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { getSupabase, supabaseErrorMessage } from '../lib/supabase'
 import { useToast } from '../lib/toast'
+import { useT } from '../lib/i18n'
 import { ErrorNote } from '../components/ErrorNote'
 import { Spinner } from '../components/Spinner'
 import { AuthShell } from './AuthShell'
@@ -21,6 +22,7 @@ export default function ResetPage() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
   const toast = useToast()
+  const t = useT()
   const { provider, loading: authLoading, logout } = useAuth()
   const supabaseMode = provider === 'supabase'
   const token = params.get('token') ?? ''
@@ -31,7 +33,7 @@ export default function ResetPage() {
   const [done, setDone] = useState<string | null>(null)
   const [recovery, setRecovery] = useState<RecoveryState>('waiting')
 
-  // Supabase mode: the link from the email signs the user in with a recovery session. Wait for it.
+  // Supabase mode: the link from the email (directly, or via /auth/callback) signs the user in with a recovery session.
   useEffect(() => {
     if (authLoading) return
     const sb = getSupabase()
@@ -61,11 +63,11 @@ export default function ResetPage() {
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (password.length < 8) {
-      setError('Password must be at least 8 characters.')
+      setError(t('security.min8'))
       return
     }
     if (password !== confirm) {
-      setError('Passwords do not match.')
+      setError(t('security.noMatch'))
       return
     }
     setBusy(true)
@@ -76,7 +78,7 @@ export default function ResetPage() {
         const { error: upErr } = await sb.auth.updateUser({ password })
         if (upErr) throw new Error(supabaseErrorMessage(upErr))
         await logout()
-        toast.success('Password updated. Sign in with your new password.')
+        toast.success(t('reset.updatedSignIn'))
         navigate('/login', { replace: true })
         return
       }
@@ -91,9 +93,9 @@ export default function ResetPage() {
 
   if (authLoading) {
     return (
-      <AuthShell title="Choose a new password" subtitle="One moment.">
+      <AuthShell title={t('reset.title')} subtitle={t('reset.oneMoment')}>
         <div className="flex items-center gap-2 text-sm text-neutral-500 py-2">
-          <Spinner /> Checking your link
+          <Spinner /> {t('reset.checkingLink')}
         </div>
       </AuthShell>
     )
@@ -103,13 +105,13 @@ export default function ResetPage() {
 
   if (linkMissing) {
     return (
-      <AuthShell title="This link is incomplete" subtitle="The reset link is missing its token or has expired. Request a fresh one and open it directly from the email.">
+      <AuthShell title={t('reset.incompleteTitle')} subtitle={t('reset.incompleteSubtitle')}>
         <Link to="/forgot" className="btn-primary w-full">
-          Request a new link
+          {t('reset.requestNew')}
         </Link>
         <p className="text-sm text-neutral-500 mt-6">
           <Link to="/login" className="text-brand font-semibold hover:underline">
-            Back to sign in
+            {t('auth.backToSignIn')}
           </Link>
         </p>
       </AuthShell>
@@ -118,16 +120,16 @@ export default function ResetPage() {
 
   if (supabaseMode && recovery === 'waiting') {
     return (
-      <AuthShell title="Choose a new password" subtitle="One moment while we verify your reset link.">
+      <AuthShell title={t('reset.title')} subtitle={t('reset.verifying')}>
         <div className="flex items-center gap-2 text-sm text-neutral-500 py-2">
-          <Spinner /> Verifying your link
+          <Spinner /> {t('reset.checkingLink')}
         </div>
       </AuthShell>
     )
   }
 
   return (
-    <AuthShell title="Choose a new password" subtitle="At least 8 characters. You will be signed out everywhere else.">
+    <AuthShell title={t('reset.title')} subtitle={t('reset.subtitle')}>
       {done ? (
         <div className="space-y-5">
           <div className="flex items-start gap-3 rounded-card border border-line bg-success-tint px-3.5 py-3 text-sm text-success">
@@ -135,13 +137,13 @@ export default function ResetPage() {
             <span>{done}</span>
           </div>
           <Link to="/login" className="btn-primary w-full">
-            Sign in
+            {t('auth.signIn')}
           </Link>
         </div>
       ) : (
         <form onSubmit={submit} className="space-y-4">
           <div>
-            <label className="label" htmlFor="password">New password</label>
+            <label className="label" htmlFor="password">{t('security.newPassword')}</label>
             <input
               id="password"
               type="password"
@@ -155,7 +157,7 @@ export default function ResetPage() {
             />
           </div>
           <div>
-            <label className="label" htmlFor="confirm">Confirm new password</label>
+            <label className="label" htmlFor="confirm">{t('security.confirmNewPassword')}</label>
             <input
               id="confirm"
               type="password"
@@ -166,18 +168,18 @@ export default function ResetPage() {
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
             />
-            {mismatch && <p className="text-xs text-danger mt-1">Passwords do not match.</p>}
+            {mismatch && <p className="text-xs text-danger mt-1">{t('security.noMatch')}</p>}
           </div>
           <ErrorNote message={error} />
           <button type="submit" className="btn-primary w-full" disabled={busy || mismatch}>
-            {busy && <Spinner />} Update password
+            {busy && <Spinner />} {t('reset.update')}
           </button>
         </form>
       )}
       {!done && (
         <p className="text-sm text-neutral-500 mt-6">
           <Link to="/login" className="text-brand font-semibold hover:underline">
-            Back to sign in
+            {t('auth.backToSignIn')}
           </Link>
         </p>
       )}

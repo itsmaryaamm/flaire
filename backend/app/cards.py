@@ -44,6 +44,19 @@ def issue_card_for_agent(db: Session, company: Company, agent: Agent, actor: str
     return card
 
 
+def issue_missing_cards(db: Session, company: Company, actor: str = "system") -> list[Card]:
+    """Every active employee without a card gets one. Called when a Lithic key is saved so employees created earlier are covered too."""
+    issued: list[Card] = []
+    for agent in db.query(Agent).filter(Agent.company_id == company.id, Agent.status == "active").order_by(Agent.id).all():
+        card = db.get(Card, agent.card_id) if agent.card_id else None
+        if card is not None:
+            continue
+        card = issue_card_for_agent(db, company, agent, actor=actor)
+        if card is not None:
+            issued.append(card)
+    return issued
+
+
 def sync_card_with_agent(db: Session, company: Company, agent: Agent) -> None:
     """Mirror limit and status changes to the issuer."""
     if not agent.card_id:

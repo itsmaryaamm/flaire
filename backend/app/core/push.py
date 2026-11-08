@@ -35,8 +35,9 @@ def get_keys(db: Session) -> tuple[str, str]:
     return private_pem, public_b64
 
 
-def send_to_company_approvers(db: Session, company_id: int, title: str, body: str, url: str, user_ids: list[int] | None = None) -> dict:
-    """Pushes to approvers' devices. With user_ids, only those people (the ones who can act on the current step)."""
+def send_to_company_approvers(db: Session, company_id: int, title: str, body: str, url: str, user_ids: list[int] | None = None, extra: dict | None = None) -> dict:
+    """Pushes to approvers' devices. With user_ids, only those people (the ones who can act on the current step).
+    `extra` is merged into the payload (employee, merchant, amount, reason, held_because, step, request_id) so the app can render the decision."""
     settings = get_settings()
     private_pem, _ = get_keys(db)
     q = db.query(PushSubscription).join(User, User.id == PushSubscription.user_id).filter(User.company_id == company_id)
@@ -56,7 +57,7 @@ def send_to_company_approvers(db: Session, company_id: int, title: str, body: st
     for sub in subs:
         try:
             webpush(subscription_info={"endpoint": sub.endpoint, "keys": {"p256dh": sub.p256dh, "auth": sub.auth}},
-                    data=json.dumps({"title": title, "body": body, "url": url}), vapid_private_key=vapid,
+                    data=json.dumps({**(extra or {}), "title": title, "body": body, "url": url}, default=str), vapid_private_key=vapid,
                     vapid_claims={"sub": f"mailto:{settings.smtp_from or 'flaire@example.com'}"}, ttl=3600)
             sent += 1
         except WebPushException as exc:

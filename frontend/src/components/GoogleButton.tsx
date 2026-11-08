@@ -17,16 +17,19 @@ function GoogleMark() {
 }
 
 /** "Continue with Google" for Supabase mode. Shows a toast when the Google provider is not switched on. */
-export function GoogleButton() {
-  const { signInWithGoogle } = useAuth()
+export function GoogleButton({ returnTo }: { returnTo?: string } = {}) {
+  const { signInWithGoogle, provider, googleEnabled } = useAuth()
   const toast = useToast()
   const t = useT()
   const [busy, setBusy] = useState(false)
 
+  // Only Supabase mode has Google, and only when /auth/config does not say it is off (missing field: show it).
+  if (provider !== 'supabase' || !googleEnabled) return null
+
   const go = async () => {
     setBusy(true)
     try {
-      await signInWithGoogle()
+      await signInWithGoogle(returnTo)
       // The browser is being redirected to Google; keep the button busy until it leaves.
     } catch (err) {
       setBusy(false)

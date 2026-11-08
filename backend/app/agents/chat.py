@@ -156,10 +156,10 @@ def employee_chat(db: Session, company: Company, agent: Agent, user: User, run: 
             run.mode = "claude"
         except Exception as exc:
             transcript.append({"role": "assistant", "content": f"I could not reach my model ({str(exc)[:80]}). Running the simple plan instead."})
-            transcript += _scripted_employee(db, company, agent, message, created)
+            transcript += _scripted_employee(db, company, agent, message, created, transcript)
             run.mode = "scripted"
     else:
-        transcript += _scripted_employee(db, company, agent, message, created)
+        transcript += _scripted_employee(db, company, agent, message, created, transcript)
         run.mode = "scripted"
     run.transcript = transcript
     run.purchase_request_ids = created
@@ -168,33 +168,217 @@ def employee_chat(db: Session, company: Company, agent: Agent, user: User, run: 
     return run
 
 
-def _scripted_employee(db: Session, company: Company, agent: Agent, message: str, created: list[int]) -> list[dict]:
-    """No model available: ask one clarifying question if the ask is vague, otherwise buy the obvious thing once."""
-    low = message.lower()
-    m = re.search(r"(?:sar|riyals?|ريال)\s*([0-9][0-9,]*(?:\.[0-9]+)?)|([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:sar|riyals?|ريال)", low)
-    amount = float((m.group(1) or m.group(2)).replace(",", "")) if m else None
-    vendors = {"google ads": ("Google Ads", "advertising"), "snapchat": ("Snapchat Ads", "advertising"), "meta": ("Meta Ads", "advertising"), "linkedin": ("LinkedIn Ads", "advertising"),
-               "canva": ("Canva", "software"), "notion": ("Notion", "software"), "slack": ("Slack", "software"), "aws": ("AWS", "software"), "aramex": ("Aramex", "logistics"),
-               "laptop": ("Jarir Bookstore", "equipment"), "gift card": ("Gift card", "gift_card"), "collabstr": ("Collabstr", "services")}
-    hit = next(((v, c) for k, (v, c) in vendors.items() if k in low), None)
+# ---------------------------------------------------------------- scripted employee: intent router with purchase state in the transcript
+VENDORS = {"google ads": ("Google Ads", "advertising"), "snapchat": ("Snapchat Ads", "advertising"), "snap ads": ("Snapchat Ads", "advertising"), "tiktok": ("TikTok Ads", "advertising"),
+           "meta": ("Meta Ads", "advertising"), "facebook": ("Meta Ads", "advertising"), "instagram": ("Meta Ads", "advertising"), "linkedin": ("LinkedIn Ads", "advertising"),
+           "twitter": ("X Ads", "advertising"), "x ads": ("X Ads", "advertising"),
+           "canva": ("Canva", "software"), "notion": ("Notion", "software"), "slack": ("Slack", "software"), "aws": ("AWS", "software"), "figma": ("Figma", "software"),
+           "zoom": ("Zoom", "software"), "google workspace": ("Google Workspace", "software"), "microsoft": ("Microsoft 365", "software"), "hubspot": ("HubSpot", "software"),
+           "aramex": ("Aramex", "logistics"), "smsa": ("SMSA Express", "logistics"), "laptop": ("Jarir Bookstore", "equipment"), "jarir": ("Jarir Bookstore", "equipment"),
+           "gift card": ("Gift card", "gift_card"), "collabstr": ("Collabstr", "services"), "upwork": ("Upwork", "services"), "fiverr": ("Fiverr", "services"),
+           "freelancer": ("Upwork", "services"), "stc": ("STC", "utilities"), "mobily": ("Mobily", "utilities")}
+PURCHASE_VERBS = ("buy", "purchase", "pay", "order", "launch", "run", "subscribe", "renew", "book", "hire", "boost", "promote", "advertise", "get", "need", "want", "procure")
+PURCHASE_PHRASES = ("run a campaign", "run campaign", "run ads", "run some ads", "top up", "sign up for", "new campaign")
+QUESTION_STARTS = ("what", "how", "why", "which", "did", "was", "were", "is", "are", "show", "list", "tell", "when", "who", "explain", "status")
+GREETINGS = ("hi", "hello", "hey", "salam", "salaam", "marhaba", "good morning", "good afternoon", "good evening", "assalam", "yo", "hola")
+
+
+def _amount_in(text: str, allow_bare: bool) -> float | None:
+    """SAR 300, 300 SAR, 300 riyals, 1,200.50. With allow_bare, a plain number not prefixed by # counts too."""
+    low = text.lower()
+    m = re.search(r"(?:sar|riyals?|ريال|rs\.?)\s*([0-9][0-9,]*(?:\.[0-9]+)?)|([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:k\b)?\s*(?:sar|riyals?|ريال)", low)
+    if m:
+        return float((m.group(1) or m.group(2)).replace(",", ""))
+    if allow_bare:
+        m = re.search(r"(?<![#\w])([0-9][0-9,]*(?:\.[0-9]+)?)(k)?(?![\w#])", low)
+        if m:
+            val = float(m.group(1).replace(",", ""))
+            return val * 1000 if m.group(2) else val
+    return None
+
+
+def _vendor_in(text: str) -> tuple[str, str] | None:
+    low = text.lower()
+    hit = next(((v, c) for k, (v, c) in VENDORS.items() if k in low), None)
+    if hit:
+        return hit
+    # "on Acme Studio", "at Jarir", "from Fresh Prints": a capitalised name after a preposition
+    m = re.search(r"\b(?:on|at|from|to|with|via)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})", text)
+    if m:
+        from app.core.categorize import categorize
+        name = m.group(1).strip()
+        return name, categorize(name, None, text)[0]
+    return None
+
+
+def _draft_from(transcript: list[dict] | None) -> dict | None:
+    """The open purchase draft, if the last purchase-related entry was a question for a missing detail."""
+    for e in reversed(transcript or []):
+        if e.get("role") == "tool" and e.get("name") == "request_purchase":
+            return None  # last purchase completed; nothing open
+        if e.get("role") == "tool" and e.get("name") == "draft_purchase":
+            return dict(e.get("input") or {})
+    return None
+
+
+def _month_transactions(db: Session, agent: Agent) -> list[Transaction]:
+    month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return (db.query(Transaction).join(PurchaseRequest, PurchaseRequest.id == Transaction.purchase_request_id)
+            .filter(PurchaseRequest.agent_id == agent.id, Transaction.status.in_(["settled", "authorized"]), Transaction.created_at >= month_start)
+            .order_by(Transaction.id.desc()).all())
+
+
+def _say(text: str) -> dict:
+    return {"role": "assistant", "content": text}
+
+
+def _reason_text(pr: PurchaseRequest) -> str:
+    d = pr.decision or {}
+    reasons = [r for r in d.get("reasons", []) if r]
+    if d.get("payment_error"):
+        reasons.append(d["payment_error"])
+    return " ".join(reasons[-2:]) if reasons else "No reason was recorded."
+
+
+def _scripted_employee(db: Session, company: Company, agent: Agent, message: str, created: list[int], transcript: list[dict] | None = None) -> list[dict]:
+    """No model available: answer questions from Flaire's data, and buy only when clearly asked to.
+
+    Intents: greeting, help, what did you buy / spending this month, budget / how much is left, status of my last request,
+    why was it held or denied, list pending, purchase (with one question for the single missing detail, remembered in the
+    transcript as a draft_purchase entry so the next message completes it)."""
+    text = message.strip()
+    low = text.lower()
+    words = re.findall(r"[a-z']+", low)
+    out: list[dict] = []
+    ids = [int(x) for x in re.findall(r"#\s*(\d+)", low)]
+    mine = db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id)
+    last_pr = mine.order_by(PurchaseRequest.id.desc()).first()
+
+    draft = _draft_from(transcript)
+    vendor = _vendor_in(text)
+    verb = any(v in words for v in PURCHASE_VERBS) or any(p in low for p in PURCHASE_PHRASES)
+    amount = _amount_in(text, allow_bare=bool(draft) or verb or vendor is not None)
+    question_start = bool(words) and words[0] in QUESTION_STARTS
+    # Only a clear ask to buy, pay, order, launch or run something, or an amount, moves to the purchase flow.
+    wants_purchase = ((amount is not None) and not question_start) or (verb and not question_start) or (verb and vendor is not None)
+
+    # 1. continuation of an open draft: the user supplied the missing detail
+    if draft and (amount is not None or vendor is not None) and not question_start:
+        merged = {"merchant": draft.get("merchant") or (vendor[0] if vendor else None), "category": draft.get("category") or (vendor[1] if vendor else None),
+                  "amount_sar": draft.get("amount_sar") or amount, "description": draft.get("description") or text, "force": bool(draft.get("force")) or "again" in low}
+        return _purchase_flow(db, company, agent, merged, text, created, low)
+
+    # 2. greetings
+    if words and words[0] in GREETINGS and len(words) <= 8 and not wants_purchase:
+        return [_say(f"Hi, I am {agent.name}, the {agent.role} AI employee at {company.name}. Ask me what I bought this month, how much budget is left, the status of my last request, "
+                     f"or tell me what to buy (for example \"SAR 300 on Google Ads for the Riyadh launch\").")]
+
+    # 3. help
+    if "help" in words or "what can you do" in low or "what do you do" in low or "capabilities" in low:
+        return [_say("I spend company money through Flaire, within my limits. I can: tell you what I bought this month and the totals; show my budget and how much is left; "
+                     "report the status of my last request; explain why a request was held or denied; list requests waiting for a human; and buy things you ask for "
+                     "(say the vendor and the amount in SAR). I cannot approve holds or change limits; a human does that in the Flaire dashboard.")]
+
+    # 4. why held / denied / blocked
+    if ("why" in words or any(k in low for k in ("held", "on hold", "denied", "blocked", "rejected", "declined", "refused"))) and not wants_purchase:
+        target = db.get(PurchaseRequest, ids[0]) if ids else mine.filter(PurchaseRequest.status.in_(["pending_approval", "denied", "rejected", "failed"])).order_by(PurchaseRequest.id.desc()).first()
+        if target and target.agent_id != agent.id:
+            target = None
+        if not target:
+            return [_say("Nothing of mine has been held or denied recently." + (f" My last request, #{last_pr.id} {last_pr.merchant} {_sar(last_pr.amount)}, is {last_pr.status}." if last_pr else ""))]
+        out.append({"role": "tool", "name": "get_purchase_status", "input": {"request_id": target.id}, "output": request_view(target)})
+        state = {"pending_approval": "is waiting for a human", "denied": "was denied by Flaire", "rejected": "was rejected by a human", "failed": "was approved but the payment failed"}.get(target.status, f"is {target.status}")
+        out.append(_say(f"Request #{target.id} ({target.merchant}, {_sar(target.amount)}) {state}: {_reason_text(target)}"))
+        return out
+
+    # 5. spending / what did you buy
+    if any(k in low for k in ("what did you buy", "what have you bought", "bought", "purchases", "spending", "spent", "what did you pay", "paid for", "transactions")) and not wants_purchase:
+        txs = _month_transactions(db, agent)
+        out.append({"role": "tool", "name": "list_my_requests", "input": {"limit": 10}, "output": {"requests": [request_view(p) for p in mine.order_by(PurchaseRequest.id.desc()).limit(10).all()]}})
+        if not txs:
+            out.append(_say("I have not paid for anything this month yet."))
+            return out
+        total = sum(t.amount for t in txs)
+        lines = "; ".join(f"{t.merchant} {_sar(t.amount)} on {t.created_at.date()}" for t in txs[:8])
+        more = f" and {len(txs) - 8} more" if len(txs) > 8 else ""
+        out.append(_say(f"This month I completed {len(txs)} purchase{'s' if len(txs) != 1 else ''} totalling {_sar(total)}: {lines}{more}. Flaire fees on these: {_sar(sum(t.fee or 0 for t in txs))}."))
+        return out
+
+    # 6. budget / how much is left
+    if any(k in low for k in ("budget", "how much is left", "how much do i have", "how much can", "remaining", "left to spend", "my limit", "limits", "allowance")) and not wants_purchase:
+        b = budget_view(db, agent)
+        out.append({"role": "tool", "name": "check_budget", "input": {}, "output": b})
+        left = max(b["monthly_limit_sar"] - b["spent_this_month_sar"], 0)
+        dept = f" My department ({b['department']}) has {_sar(int(round((b['department_remaining_sar'] or 0) * 100)))} left." if b.get("department") else ""
+        out.append(_say(f"I have {_sar(int(round(left * 100)))} left of my {_sar(int(round(b['monthly_limit_sar'] * 100)))} monthly limit (spent {_sar(int(round(b['spent_this_month_sar'] * 100)))}). "
+                        f"Per purchase I can spend up to {_sar(int(round(b['per_purchase_limit_sar'] * 100)))}; anything from {_sar(int(round(b['human_approval_from_sar'] * 100)))} needs a human.{dept}"
+                        + (" The kill switch is ON, so nothing can be paid right now." if b["kill_switch_on"] else "")))
+        return out
+
+    # 7. pending list
+    if any(k in low for k in ("pending", "waiting", "awaiting", "on hold", "holds", "need approval", "needs approval")) and not wants_purchase:
+        rows = mine.filter(PurchaseRequest.status == "pending_approval").order_by(PurchaseRequest.id).all()
+        out.append({"role": "tool", "name": "list_my_requests", "input": {"status": "pending_approval"}, "output": {"requests": [request_view(p) for p in rows]}})
+        if not rows:
+            out.append(_say("Nothing of mine is waiting for approval."))
+        else:
+            out.append(_say(f"{len(rows)} waiting for a human: " + "; ".join(f"#{p.id} {p.merchant} {_sar(p.amount)} ({(p.decision or {}).get('reasons', ['held'])[0]})" for p in rows)))
+        return out
+
+    # 8. status of my last request
+    if any(k in low for k in ("status", "last request", "my request", "latest request", "did it go through", "was it paid", "update on")) and not wants_purchase:
+        target = db.get(PurchaseRequest, ids[0]) if ids else last_pr
+        if target and target.agent_id != agent.id:
+            target = None
+        if not target:
+            return [_say("I have not made any requests yet.")]
+        out.append({"role": "tool", "name": "get_purchase_status", "input": {"request_id": target.id}, "output": request_view(target)})
+        label = {"completed": "paid", "pending_approval": "waiting for a human", "denied": "denied", "rejected": "rejected by a human", "failed": "approved but the payment failed", "approved": "approved, payment in progress"}.get(target.status, target.status)
+        extra = f" Reason: {_reason_text(target)}" if target.status != "completed" else ""
+        out.append(_say(f"My last request, #{target.id}: {_sar(target.amount)} at {target.merchant}, is {label}.{extra}"))
+        return out
+
+    # 9. purchase
+    if wants_purchase:
+        return _purchase_flow(db, company, agent, {"merchant": vendor[0] if vendor else None, "category": vendor[1] if vendor else None, "amount_sar": amount, "description": text,
+                                                   "force": "again" in low}, text, created, low)
+
+    # 10. fallback
+    recent = mine.order_by(PurchaseRequest.id.desc()).limit(3).all()
+    return [_say("I can tell you what I bought this month, how much budget is left, the status of my last request, why something was held, or buy something for you "
+                 "(say the vendor and the amount in SAR)." + (" Recent: " + "; ".join(f"#{p.id} {p.merchant} {_sar(p.amount)} ({p.status})" for p in recent) + "." if recent else ""))]
+
+
+def _purchase_flow(db: Session, company: Company, agent: Agent, draft: dict, text: str, created: list[int], low: str) -> list[dict]:
+    """Ask one question for the single missing detail, or buy once everything is known."""
     out = [{"role": "tool", "name": "check_budget", "input": {}, "output": budget_view(db, agent)}]
-    if not hit or amount is None:
-        out.append({"role": "assistant", "content": "Happy to. Two quick things so I buy the right thing: which vendor or channel, and roughly how much in SAR? (Example: \"SAR 300 on Google Ads for the Riyadh launch\".)"})
+    merchant, amount = draft.get("merchant"), draft.get("amount_sar")
+    if not merchant:
+        out.append({"role": "tool", "name": "draft_purchase", "input": {**draft, "description": (draft.get("description") or text)[:200]}, "output": {"missing": "merchant"}})
+        what = f" for {_sar(int(round(float(amount) * 100)))}" if amount else ""
+        out.append(_say(f"Happy to. Which vendor or channel should I pay{what}? (For example Google Ads, Snapchat Ads, Canva or Notion.)"))
         return out
-    recent = db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id, PurchaseRequest.merchant == hit[0], PurchaseRequest.status == "completed",
+    if not amount:
+        out.append({"role": "tool", "name": "draft_purchase", "input": {**draft, "description": (draft.get("description") or text)[:200]}, "output": {"missing": "amount"}})
+        out.append(_say(f"How much should I spend on {merchant}, in SAR?"))
+        return out
+    amount = float(amount)
+    category = draft.get("category") or "other"
+    recent = db.query(PurchaseRequest).filter(PurchaseRequest.agent_id == agent.id, PurchaseRequest.merchant == merchant, PurchaseRequest.status == "completed",
                                                PurchaseRequest.created_at >= datetime.now(timezone.utc) - timedelta(days=30)).first()
-    if recent and "again" not in low:
-        out.append({"role": "assistant", "content": f"We already paid {hit[0]} {_sar(recent.amount)} on {recent.created_at.date()} (request #{recent.id}). I will not buy it twice. Say \"buy again\" if this is a separate purchase."})
+    if recent and not draft.get("force") and "again" not in low:
+        out.append(_say(f"We already paid {merchant} {_sar(recent.amount)} on {recent.created_at.date()} (request #{recent.id}). I will not buy it twice. Say \"buy again\" if this is a separate purchase."))
         return out
-    res = employee_tool(db, company, agent, "request_purchase", {"amount_sar": amount, "merchant": hit[0], "category": hit[1], "description": message[:200]}, created)
-    out.append({"role": "tool", "name": "request_purchase", "input": {"amount_sar": amount, "merchant": hit[0], "category": hit[1]}, "output": res})
+    res = employee_tool(db, company, agent, "request_purchase", {"amount_sar": amount, "merchant": merchant, "category": category, "description": (draft.get("description") or text)[:200]}, created)
+    out.append({"role": "tool", "name": "request_purchase", "input": {"amount_sar": amount, "merchant": merchant, "category": category}, "output": res})
     status = res.get("status")
+    money = _sar(int(round(amount * 100)))
     if status == "completed":
-        out.append({"role": "assistant", "content": f"Done: {_sar(int(amount * 100))} paid to {hit[0]} (request #{res['request_id']}). Status: paid."})
+        out.append(_say(f"Done: {money} paid to {merchant} (request #{res['request_id']}). Status: paid."))
     elif status == "pending_approval":
-        out.append({"role": "assistant", "content": f"Submitted {_sar(int(amount * 100))} for {hit[0]}. Flaire held it for a human: {res['reasons'][-1]} I will carry on with everything that does not depend on it. Status: waiting."})
+        out.append(_say(f"Submitted {money} for {merchant} (request #{res['request_id']}). Flaire held it for a human: {(res.get('reasons') or ['needs approval'])[-1]} I will carry on with everything that does not depend on it. Status: waiting."))
     else:
-        out.append({"role": "assistant", "content": f"Flaire blocked {_sar(int(amount * 100))} at {hit[0]}: {(res.get('reasons') or [res.get('payment_error') or 'no reason given'])[-1]} Tell me if you want a different supplier or amount. Status: blocked."})
+        out.append(_say(f"Flaire blocked {money} at {merchant}: {(res.get('reasons') or [res.get('payment_error') or 'no reason given'])[-1]} Tell me if you want a different supplier or amount. Status: blocked."))
     return out
 
 
@@ -271,11 +455,12 @@ def assistant_chat(db: Session, company: Company, user: User, history: list[dict
 
 
 def _scripted_assistant(db: Session, company: Company, user: User, message: str, actions: list[dict]) -> str:
-    low = message.lower()
+    low = message.lower().strip()
+    words = re.findall(r"[a-z']+", low)
     pending = assistant_tool(db, company, user, "pending_approvals", {}, actions)["pending"]
+    ids = re.findall(r"#?(\d+)", low)
     if any(k in low for k in ("approve", "reject", "decline", "deny")):
         act = "reject" if any(k in low for k in ("reject", "decline", "deny")) else "approve"
-        ids = re.findall(r"#?(\d+)", low)
         cand = [p for p in pending if str(p["request_id"]) in ids] or [p for p in pending if any(w in low for w in p["merchant"].lower().split())]
         if len(cand) == 1:
             assistant_tool(db, company, user, "prepare_decision", {"request_id": cand[0]["request_id"], "action": act}, actions)
@@ -283,22 +468,53 @@ def _scripted_assistant(db: Session, company: Company, user: User, message: str,
         if not pending:
             return "Nothing is waiting for approval right now."
         return "Which one? Waiting: " + "; ".join(f"#{p['request_id']} {p['merchant']} {_sar(int(p['amount_sar'] * 100))}" for p in pending)
+    if words and words[0] in GREETINGS and len(words) <= 8:
+        waiting = f" {len(pending)} request{'s' if len(pending) != 1 else ''} waiting for you." if pending else " Nothing needs you right now."
+        return f"Hi {user.full_name.split()[0]}.{waiting} Ask me what was bought this month, how much budget is left, why something was held, or tell me to prepare an approval."
+    if "help" in words or "what can you do" in low:
+        return ("I can tell you what needs you, why a request was held or denied, what the AI employees bought this month and the totals, how much budget is left per "
+                "employee and department, the status of the latest request, and prepare an approval or rejection (you confirm with your password). I never approve on my own.")
     if any(k in low for k in ("pending", "waiting", "need", "approval")):
         if not pending:
             return "Nothing needs you right now."
         return "Waiting for you: " + "; ".join(f"#{p['request_id']} {p['agent']} wants {_sar(int(p['amount_sar'] * 100))} at {p['merchant']} ({p['reasons'][-1] if p['reasons'] else ''})" for p in pending)
-    if any(k in low for k in ("spend", "spent", "budget", "how much", "fee")):
-        s = assistant_tool(db, company, user, "spend_summary", {}, actions)
-        emp = ", ".join(f"{e['name']} {_sar(int(e['spent_sar'] * 100))} of {_sar(int(e['monthly_limit_sar'] * 100))}" for e in s["employees"]) or "no employees yet"
-        return f"This month: {emp}. Flaire fees so far: {_sar(int(s['flaire_fees_this_month_sar'] * 100))} ({s['fee_rate_percent']}%). Kill switch is {'ON' if s['kill_switch_on'] else 'off'}."
-    if "why" in low or "explain" in low:
-        ids = re.findall(r"#?(\d+)", low)
+    if any(k in low for k in ("what did", "bought", "buy", "purchases", "paid for", "transactions", "spending")):
+        month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        txs = (db.query(Transaction).filter(Transaction.company_id == company.id, Transaction.status.in_(["settled", "authorized"]), Transaction.created_at >= month_start)
+               .order_by(Transaction.id.desc()).all())
+        if not txs:
+            return "Nothing has been paid this month yet."
+        names = {}
+        for t in txs:
+            pr = db.get(PurchaseRequest, t.purchase_request_id)
+            names[t.id] = pr.agent.name if pr and pr.agent else "?"
+        total = sum(t.amount for t in txs)
+        return (f"This month: {len(txs)} purchase{'s' if len(txs) != 1 else ''} totalling {_sar(total)}. "
+                + "; ".join(f"{names[t.id]} paid {t.merchant} {_sar(t.amount)} on {t.created_at.date()}" for t in txs[:8]) + ("." if len(txs) <= 8 else f" and {len(txs) - 8} more."))
+    if any(k in low for k in ("left", "remaining", "budget", "spend", "spent", "how much", "fee", "limit")):
+        s_ = assistant_tool(db, company, user, "spend_summary", {}, actions)
+        emp = ", ".join(f"{e['name']} {_sar(int(e['spent_sar'] * 100))} of {_sar(int(e['monthly_limit_sar'] * 100))} ({_sar(int((e['monthly_limit_sar'] - e['spent_sar']) * 100))} left)" for e in s_["employees"]) or "no employees yet"
+        dep = ", ".join(f"{d['name']} {_sar(int(d['remaining_sar'] * 100))} left of {_sar(int(d['budget_sar'] * 100))}" for d in s_["departments"]) or "no departments yet"
+        return f"Employees this month: {emp}. Departments: {dep}. Flaire fees so far: {_sar(int(s_['flaire_fees_this_month_sar'] * 100))} ({s_['fee_rate_percent']}%). Kill switch is {'ON' if s_['kill_switch_on'] else 'off'}."
+    if "why" in words or "explain" in words or any(k in low for k in ("held", "denied", "blocked", "rejected")):
+        target = None
         if ids:
             e = assistant_tool(db, company, user, "explain_request", {"request_id": int(ids[0])}, actions)
-            if "error" not in e:
-                return f"#{e['request_id']} {e['merchant']} {_sar(int(e['amount_sar'] * 100))} is {e['status']}. " + " ".join(e["reasons"][-3:])
+            target = e if "error" not in e else None
+        if target is None:
+            row = (db.query(PurchaseRequest).filter(PurchaseRequest.company_id == company.id, PurchaseRequest.status.in_(["pending_approval", "denied", "rejected", "failed"]))
+                   .order_by(PurchaseRequest.id.desc()).first())
+            target = assistant_tool(db, company, user, "explain_request", {"request_id": row.id}, actions) if row else None
+        if target:
+            return f"#{target['request_id']} {target['agent']} at {target['merchant']} {_sar(int(target['amount_sar'] * 100))} is {target['status']}. " + (" ".join(target["reasons"][-3:]) or target.get("payment_error") or "No reason recorded.")
         recent = assistant_tool(db, company, user, "recent_activity", {"limit": 3}, actions)["requests"]
-        return "Tell me the request number. Recent: " + "; ".join(f"#{r['request_id']} {r['merchant']} ({r['status']})" for r in recent)
+        return "Nothing has been held or denied. Recent: " + "; ".join(f"#{r['request_id']} {r['merchant']} ({r['status']})" for r in recent)
+    if any(k in low for k in ("status", "last request", "latest")):
+        recent = assistant_tool(db, company, user, "recent_activity", {"limit": 1}, actions)["requests"]
+        if not recent:
+            return "No requests yet."
+        r = recent[0]
+        return f"Latest: #{r['request_id']} {r['agent']} {r['merchant']} {_sar(int(r['amount_sar'] * 100))} is {r['status']}." + (f" {r['reasons'][-1]}" if r["reasons"] and r["status"] != "completed" else "")
     recent = assistant_tool(db, company, user, "recent_activity", {"limit": 5}, actions)["requests"]
-    return ("I can tell you what needs you, why something was held, how much was spent, or prepare an approval. Recent activity: "
+    return ("I can tell you what needs you, why something was held, what was bought, how much is left, or prepare an approval. Recent activity: "
             + ("; ".join(f"#{r['request_id']} {r['agent']} {r['merchant']} {_sar(int(r['amount_sar'] * 100))} ({r['status']})" for r in recent) or "nothing yet") + ".")

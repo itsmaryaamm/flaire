@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Date, DateTime, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -11,6 +11,11 @@ from app.core.db import Base
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _default_require_2fa() -> bool:
+    from app.core.config import get_settings
+    return bool(get_settings().require_2fa_for_new_companies)
 
 
 class Company(Base):
@@ -32,8 +37,12 @@ class Company(Base):
     lithic_api_key_enc: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted, entered in Settings → Payments
     lithic_asa_secret_enc: Mapped[str | None] = mapped_column(Text, nullable=True)  # ASA HMAC secret, encrypted
     lithic_asa_enrolled: Mapped[bool] = mapped_column(Boolean, default=False)
+    lithic_asa_error: Mapped[str | None] = mapped_column(String(300), nullable=True)   # last automatic enrollment failure, if any
+    lithic_environment: Mapped[str | None] = mapped_column(String(12), nullable=True)  # sandbox | production, detected when the key is saved
     fee_rate_bps: Mapped[int] = mapped_column(Integer, default=15)  # Flaire fee: 0.15% of every settled transaction
     require_2fa_for_approvers: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Mandatory 2FA for every member. New companies default to on (REQUIRE_2FA_FOR_NEW_COMPANIES); see security.get_current_user.
+    require_2fa_for_all: Mapped[bool] = mapped_column(Boolean, default=lambda: _default_require_2fa())
     onboarding_done: Mapped[bool] = mapped_column(Boolean, default=False)
     # Enterprise
     vat_rate_bps: Mapped[int] = mapped_column(Integer, default=1500)      # 15% KSA VAT, recorded on each transaction
@@ -114,10 +123,12 @@ class Agent(Base):
     cost_center_id: Mapped[int | None] = mapped_column(ForeignKey("cost_centers.id"), nullable=True)
     gl_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     max_requests_per_day: Mapped[int] = mapped_column(Integer, default=50)
+    owner_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)  # the accountable human (defaults to the creator)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     company: Mapped[Company] = relationship(back_populates="agents")
     department: Mapped[Department] = relationship(back_populates="agents")
+    owner: Mapped[User | None] = relationship(foreign_keys=[owner_user_id])
 
 
 class Card(Base):
@@ -188,9 +199,17 @@ class Transaction(Base):
     gl_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
     period: Mapped[str | None] = mapped_column(String(7), nullable=True, index=True)  # YYYY-MM
     locked: Mapped[bool] = mapped_column(Boolean, default=False)      # set by period close
+    # What the issuer actually moved. Flaire amounts are SAR halalas; Lithic sandbox cards are USD cents (amount / fx_rate).
+    issuer_amount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    issuer_currency: Mapped[str] = mapped_column(String(3), default="USD")
+    fx_rate: Mapped[float] = mapped_column(Float, default=3.75)
+    # The one human accountable for this money: the approver, or the employee's owner for auto-approved purchases.
+    accountable_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    accountable_reason: Mapped[str | None] = mapped_column(String(30), nullable=True)  # approved | auto_under_limits
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
     card: Mapped[Card] = relationship()
+    accountable: Mapped[User | None] = relationship(foreign_keys=[accountable_user_id])
 
 
 class AgentRun(Base):
@@ -242,6 +261,22 @@ class PushSubscription(Base):
     auth: Mapped[str] = mapped_column(String(100))
     user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Notification(Base):
+    """In-app feed item for one user: a hold to act on, a decision on a hold they approved, a policy change waiting for them,
+    an accepted invite or a kill switch event. Created at the same points push and email go out."""
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), index=True)
+    type: Mapped[str] = mapped_column(String(30), index=True)  # hold | decision | policy_change | invite_accepted | kill_switch
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    request_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
 
 
 class VapidKey(Base):

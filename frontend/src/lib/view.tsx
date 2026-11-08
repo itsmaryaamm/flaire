@@ -3,14 +3,17 @@ import type { ReactNode } from 'react'
 import { useAuth } from './auth'
 import { getViewMode, setViewMode as persistViewMode } from './prefs'
 import type { ViewMode } from './prefs'
+import { useIsPhone } from './useMedia'
 import { ADMIN_VIEW_ROLES } from '../types'
 import type { Role } from '../types'
 
 interface ViewState {
   /** The mode in effect. Roles without the admin view always get "my". */
   mode: ViewMode
-  /** Whether this user may switch at all. */
+  /** Whether this user may switch at all. Never on phones: the phone app has one view per role. */
   canSwitch: boolean
+  /** True below the md breakpoint. Pages use it to drop the desktop-only blocks. */
+  phone: boolean
   setMode: (mode: ViewMode) => void
 }
 
@@ -22,15 +25,21 @@ export function hasAdminView(role: string | undefined | null): boolean {
 
 export function ViewProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth()
+  const phone = useIsPhone()
   const [stored, setStored] = useState<ViewMode>(getViewMode)
-  const canSwitch = hasAdminView(user?.role)
+  const adminRole = hasAdminView(user?.role)
+  const canSwitch = adminRole && !phone
 
   const setMode = useCallback((mode: ViewMode) => {
     persistViewMode(mode)
     setStored(mode)
   }, [])
 
-  const value = useMemo<ViewState>(() => ({ mode: canSwitch ? stored : 'my', canSwitch, setMode }), [canSwitch, stored, setMode])
+  const value = useMemo<ViewState>(() => {
+    // Phone: admin roles see the company queue, everyone else their own; no toggle.
+    const mode: ViewMode = !adminRole ? 'my' : phone ? 'admin' : stored
+    return { mode, canSwitch, phone, setMode }
+  }, [adminRole, canSwitch, phone, stored, setMode])
   return <ViewContext.Provider value={value}>{children}</ViewContext.Provider>
 }
 

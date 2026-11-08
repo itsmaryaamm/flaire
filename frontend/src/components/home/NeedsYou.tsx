@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, CheckCircle2, Lock, X } from 'lucide-react'
+import { api } from '../../lib/api'
 import { sar } from '../../lib/money'
 import { timeAgo } from '../../lib/useFetch'
 import { useT } from '../../lib/i18n'
@@ -15,22 +16,52 @@ function lastReason(r: PurchaseRequest): string | null {
   return reasons.length ? reasons[reasons.length - 1] : null
 }
 
-/** Requests waiting for a human. Approve / Decline open the confirm sheet. Rows from /me/view carry the chain status. */
+/**
+ * Requests waiting for a human. Approve / Decline open the confirm sheet. Rows from /me/view carry the chain status.
+ * `decideId` (from `?decide=<id>`) opens the sheet for that request as soon as the list has loaded; the request
+ * is fetched directly when it is not in the list (older hold, different queue). `onDecideHandled` clears the param.
+ */
 export function NeedsYou({
   items,
   loading,
   killSwitch,
   onDecided,
   title,
+  decideId = null,
+  onDecideHandled,
 }: {
   items: NeedsYouItem[]
   loading: boolean
   killSwitch: boolean
   onDecided: (result: PurchaseRequest) => void
   title?: string
+  decideId?: number | null
+  onDecideHandled?: () => void
 }) {
   const t = useT()
   const [picked, setPicked] = useState<{ req: PurchaseRequest; action: DecisionAction } | null>(null)
+  const handledRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!decideId || loading || handledRef.current === decideId) return
+    handledRef.current = decideId
+    const hit = items.find((r) => r.id === decideId)
+    if (hit) {
+      setPicked({ req: hit, action: 'approve' })
+      onDecideHandled?.()
+      return
+    }
+    // No cancel flag: StrictMode runs the effect twice and handledRef already skips the second run.
+    api
+      .get<PurchaseRequest>(`/purchase-requests/${decideId}`)
+      .then(({ data }) => {
+        if (data.status === 'pending_approval') setPicked({ req: data, action: 'approve' })
+      })
+      .catch(() => {
+        // Gone or not ours: nothing to open.
+      })
+      .finally(() => onDecideHandled?.())
+  }, [decideId, loading, items, onDecideHandled])
 
   return (
     <section>

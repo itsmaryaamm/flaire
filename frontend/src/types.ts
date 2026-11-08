@@ -10,6 +10,8 @@ export interface User {
   totp_enabled: boolean
   company_id?: number
   created_at?: string
+  /** True for Flaire staff who may open the platform console at /platform. */
+  is_platform_admin?: boolean
 }
 
 export type Role = 'owner' | 'admin' | 'finance' | 'dept_head' | 'viewer' | 'auditor'
@@ -150,6 +152,8 @@ export interface Agent {
   key_expires_at?: string | null
   last_active_at: string | null
   card: AgentCard | null
+  /** The human accountable for this employee's spending. */
+  owner?: { id: number; full_name: string } | null
   cost_center_id?: number | null
   gl_code?: string | null
   created_at: string
@@ -170,7 +174,7 @@ export interface AgentCreateInput {
   gl_code?: string | null
 }
 
-export type AgentUpdateInput = Partial<AgentCreateInput> & { status?: AgentStatus }
+export type AgentUpdateInput = Partial<AgentCreateInput> & { status?: AgentStatus; owner_user_id?: number | null }
 
 export interface AgentCreateResponse {
   agent: Agent
@@ -243,6 +247,13 @@ export interface Transaction {
   period?: string | null
   /** True once the month was closed; receipts cannot change. */
   locked?: boolean
+  /** What the card issuer charged, in the issuer's minor units (e.g. US cents), and the rate used. */
+  issuer_amount?: number | null
+  issuer_currency?: string | null
+  fx_rate?: number | null
+  /** The human who answers for this payment: the approver, or the person who set the limits it passed under. */
+  accountable?: { id: number; full_name: string; role?: string | null } | null
+  accountable_reason?: 'approved' | 'auto_under_limits' | string | null
   agent_name: string | null
   created_at: string
 }
@@ -363,9 +374,62 @@ export interface FeeStatement {
 export interface LithicStatus {
   configured: boolean
   asa_enrolled: boolean
-  asa_signed: boolean
-  fee_rate_bps: number
+  asa_signed?: boolean
+  asa_error?: string | null
+  fee_rate_bps?: number
   environment: string
+}
+
+/** GET /notifications */
+export interface AppNotification {
+  id: number
+  type: string
+  title: string
+  body: string | null
+  request_id: number | null
+  url: string | null
+  created_at: string
+  read: boolean
+}
+
+// ====================================================== platform console (Flaire staff)
+
+export interface PlatformOverview {
+  companies: number
+  users: number
+  agents: number
+  active_agents: number
+  transactions_30d: number
+  volume_30d: number
+  fees_total: number
+  fees_30d: number
+  signups_by_week: { week: string; companies: number }[]
+  volume_by_week: { week: string; volume: number; fees: number }[]
+  top_companies: { id: number; name: string; volume_30d: number; fees_30d: number }[]
+}
+
+export interface PlatformCompany {
+  id: number
+  name: string
+  created_at: string
+  users: number
+  agents: number
+  transactions_30d: number
+  volume_30d: number
+  fees_30d: number
+  last_activity: string | null
+  lithic_configured: boolean
+  kill_switch: boolean
+}
+
+/** GET /platform/companies/{id}. Members and agents are best effort: the shape may grow. */
+export interface PlatformCompanyDetail extends PlatformCompany {
+  members?: { id: number; full_name: string; email?: string; role?: string; status?: string; last_seen_at?: string | null }[]
+  agents_list?: { id: number; name: string; status?: string; spent_this_period?: number; last_active_at?: string | null }[]
+  volume_total?: number
+  fees_total?: number
+  transactions_total?: number
+  [key: string]: unknown
 }
 
 /** GET /reconciliation */

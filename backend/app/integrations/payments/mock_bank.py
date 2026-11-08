@@ -40,10 +40,11 @@ class MockBankAdapter:
         if amount > card.available_balance:
             return PaymentResult(False, "declined", ref, f"Insufficient funds (available SAR {card.available_balance / 100:,.2f})")
         card.available_balance -= amount
-        return PaymentResult(True, "settled", ref, raw={"bank": self.bank, "merchant": merchant, "descriptor": descriptor})
+        return PaymentResult(True, "settled", ref, raw={"bank": self.bank, "merchant": merchant, "descriptor": descriptor},
+                             issuer_amount=amount, issuer_currency="SAR", fx_rate=1.0)
 
     def settle(self, card: Card, provider_ref: str, amount: int) -> PaymentResult:
-        return PaymentResult(True, "settled", provider_ref)
+        return PaymentResult(True, "settled", provider_ref, issuer_amount=amount, issuer_currency="SAR", fx_rate=1.0)
 
     def balance(self, card: Card) -> int:
         return card.available_balance

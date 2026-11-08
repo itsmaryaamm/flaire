@@ -44,6 +44,21 @@ def create_access_token(user_id: int, company_id: int) -> str:
 
 ONBOARDING_OK_PATHS = ("/api/v1/auth/me", "/api/v1/onboarding", "/api/v1/account", "/api/v1/auth/2fa", "/api/v1/auth/change-password",
                        "/api/v1/team/invites/accept", "/api/v1/team/invites/preview")
+# Paths a member may still use while the company requires 2FA and they have not enrolled yet (enough to set it up and sign out).
+TOTP_OK_PATHS = ("/api/v1/auth/2fa", "/api/v1/auth/me", "/api/v1/auth/config", "/api/v1/auth/logout", "/api/v1/onboarding", "/api/v1/account", "/api/v1/notifications")
+
+
+def is_platform_admin(user: User) -> bool:
+    """Platform owner console access: the email is listed in PLATFORM_ADMIN_EMAILS."""
+    return (user.email or "").lower() in get_settings().platform_admin_list
+
+
+def company_requires_totp(db: Session, user: User) -> bool:
+    if user.company_id is None or user.totp_enabled:
+        return False
+    from app.models import Company
+    company = db.get(Company, user.company_id)
+    return bool(company and company.require_2fa_for_all)
 
 
 def _user_from_supabase(db: Session, token: str) -> User | None:
@@ -82,6 +97,9 @@ def get_current_user(request: Request, creds: HTTPAuthorizationCredentials | Non
         raise HTTPException(status.HTTP_403_FORBIDDEN, "account_disabled")
     if user.company_id is None and not request.url.path.startswith(ONBOARDING_OK_PATHS):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "onboarding_required")
+    # Mandatory 2FA: Supabase and builtin users alike. Only the paths needed to enrol stay open.
+    if not request.url.path.startswith(TOTP_OK_PATHS) and company_requires_totp(db, user):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "totp_required")
     return user
 
 

@@ -103,6 +103,26 @@ def submit_purchase_request(db: Session, company: Company, agent: Agent, *, amou
     return pr
 
 
+# ---------------- accountability ----------------
+def first_owner(db: Session, company: Company) -> User | None:
+    return (db.query(User).filter(User.company_id == company.id, User.role == "owner", User.status == "active").order_by(User.id).first()
+            or db.query(User).filter(User.company_id == company.id, User.role == "owner").order_by(User.id).first())
+
+
+def accountable_for(db: Session, company: Company, agent: Agent | None, pr: PurchaseRequest) -> tuple[User | None, str]:
+    """Every transaction carries exactly one accountable human.
+    A human approved it: that human ("approved"). Auto approved under limits: the employee's owner, or the company's first
+    owner when the owner left ("auto_under_limits")."""
+    if pr.approved_by_id:
+        u = db.get(User, pr.approved_by_id)
+        if u:
+            return u, "approved"
+    owner = db.get(User, agent.owner_user_id) if agent and agent.owner_user_id else None
+    if owner is None or owner.company_id != company.id or (owner.status or "active") != "active":
+        owner = first_owner(db, company)
+    return owner, "auto_under_limits"
+
+
 # ---------------- payment ----------------
 def pick_card(db: Session, company: Company, pr: PurchaseRequest) -> Card | None:
     """Every AI employee pays with its own card and nothing else. Issue one on the fly if it is missing."""
@@ -161,9 +181,13 @@ def execute_payment(db: Session, company: Company, pr: PurchaseRequest, decision
     result = adapter.authorize(card, pr.amount, pr.merchant, f"FLAIRE*{pr.merchant}")
     fee = round(pr.amount * (company.fee_rate_bps or 0) / 10_000) if result.ok else 0
     from app.finance import stamp_transaction
+    accountable, why = accountable_for(db, company, agent, pr)
     tx = Transaction(company_id=company.id, purchase_request_id=pr.id, card_id=card.id, provider=card.provider, provider_ref=result.provider_ref,
                      amount=pr.amount, currency=pr.currency, merchant=pr.merchant, status=result.status, decline_reason=result.decline_reason,
-                     fee=fee, fee_rate_bps=company.fee_rate_bps or 0, created_at=utcnow())
+                     fee=fee, fee_rate_bps=company.fee_rate_bps or 0, created_at=utcnow(),
+                     issuer_amount=result.issuer_amount if result.issuer_amount is not None else pr.amount,
+                     issuer_currency=result.issuer_currency or pr.currency, fx_rate=result.fx_rate if result.fx_rate is not None else 1.0,
+                     accountable_user_id=accountable.id if accountable else None, accountable_reason=why)
     stamp_transaction(db, company, tx, agent, dept)
     db.add(tx)
     db.flush()
@@ -265,6 +289,8 @@ def resolve_approval(db: Session, company: Company, user: User, pr: PurchaseRequ
         execute_payment(db, company, pr, decision)
     else:
         pr.status = "rejected" if not approve else "denied"
+    from app.core.notify import notify_decision
+    notify_decision(db, company, pr, user)
     db.commit()
     db.refresh(pr)
     return pr
@@ -277,8 +303,6 @@ def set_kill_switch(db: Session, company: Company, user: User, enabled: bool, re
     company.kill_switch = enabled
     company.kill_switch_reason = reason if enabled else None
     frozen_ids: list[int] = []
-    if enabled:
-        pass
     if enabled:
         for card in db.query(Card).filter(Card.company_id == company.id, Card.status == "active").all():
             card.status = "frozen"
@@ -302,6 +326,8 @@ def set_kill_switch(db: Session, company: Company, user: User, enabled: bool, re
         company.kill_switch_frozen_cards = []
     audit.record(db, company.id, actor_type="user", actor_id=user.id, actor_name=user.full_name,
                  event="kill_switch.on" if enabled else "kill_switch.off", details={"reason": reason, "cards_frozen": frozen_ids if enabled else None})
+    from app.core.notify import notify_kill_switch
+    notify_kill_switch(db, company, user, enabled, reason)
     db.commit()
     db.refresh(company)
     return company

@@ -42,6 +42,14 @@ export function sar(halalas: number | null | undefined, opts?: { compact?: boole
   }).format(value)}`
 }
 
+/** Formats an amount in another currency's minor units, e.g. 8000 USD cents as "USD 80.00". Western digits in both languages. */
+export function money(minor: number | null | undefined, currency: string | null | undefined): string {
+  const code = (currency || 'SAR').toUpperCase()
+  if (code === 'SAR') return sar(minor)
+  const n = new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format((minor ?? 0) / 100)
+  return `${code} ${n}`
+}
+
 /** Formats halalas as a plain number string without the currency, e.g. "1,234.50". Western digits in both languages. */
 export function sarNumber(halalas: number | null | undefined): string {
   return new Intl.NumberFormat('en-US', {
