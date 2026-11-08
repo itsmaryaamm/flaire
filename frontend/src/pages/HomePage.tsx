@@ -29,7 +29,7 @@ function thisMonth(): string {
  */
 export default function HomePage() {
   const { company } = useAuth()
-  const { mode, canSwitch, phone } = useView()
+  const { mode, phone } = useView()
   const admin = mode === 'admin'
   const [search, setSearch] = useSearchParams()
   const decideId = Number(search.get('decide')) || null
@@ -38,7 +38,7 @@ export default function HomePage() {
   const approvals = useFetch(() => (admin ? api.get<PurchaseRequest[]>('/approvals').then((r) => r.data) : Promise.resolve([])), [admin])
   const fees = useFetch(() => api.get<FeeStatement>('/fees/statement', { params: { month: thisMonth() } }).then((r) => r.data), [])
   const myView = useFetch(() => (admin ? Promise.resolve(null) : api.get<MyView>('/me/view').then((r) => r.data)), [admin])
-  const adminView = useFetch(() => (admin && canSwitch ? api.get<AdminView>('/admin/view').then((r) => r.data) : Promise.resolve(null)), [admin, canSwitch])
+  const adminView = useFetch(() => (admin && !phone ? api.get<AdminView>('/admin/view').then((r) => r.data) : Promise.resolve(null)), [admin, phone])
 
   const refreshAll = useCallback(() => {
     void summary.refetch()

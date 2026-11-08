@@ -128,9 +128,6 @@ export function Layout() {
           <div className="px-5 pt-6 pb-4">
             <img src="/flaire-logo.png" alt="Flaire" className="h-7 w-auto" />
           </div>
-          <div className="px-3 pb-3">
-            <ViewToggle className="w-full justify-center" compact />
-          </div>
           <nav className="flex-1 px-3 space-y-1">
             {nav.map((n) => (
               <NavLink

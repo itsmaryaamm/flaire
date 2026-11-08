@@ -28,7 +28,7 @@ export function ViewProvider({ children }: { children: ReactNode }) {
   const phone = useIsPhone()
   const [stored, setStored] = useState<ViewMode>(getViewMode)
   const adminRole = hasAdminView(user?.role)
-  const canSwitch = adminRole && !phone
+  const canSwitch = false // the role decides the view; there is no toggle
 
   const setMode = useCallback((mode: ViewMode) => {
     persistViewMode(mode)
@@ -37,7 +37,7 @@ export function ViewProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<ViewState>(() => {
     // Phone: admin roles see the company queue, everyone else their own; no toggle.
-    const mode: ViewMode = !adminRole ? 'my' : phone ? 'admin' : stored
+    const mode: ViewMode = adminRole ? 'admin' : 'my'
     return { mode, canSwitch, phone, setMode }
   }, [adminRole, canSwitch, phone, stored, setMode])
   return <ViewContext.Provider value={value}>{children}</ViewContext.Provider>

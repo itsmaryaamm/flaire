@@ -1,11 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bot, ChevronDown, ChevronRight, Cpu, Link2, Scale, ScrollText, Server, ShieldAlert, ShieldCheck, User, Wrench } from 'lucide-react'
+import { Bot, ChevronDown, ChevronRight, Scale, ScrollText, Server, ShieldAlert, ShieldCheck, User, Wrench } from 'lucide-react'
 import { api, errorMessage } from '../../lib/api'
-import { useAuth } from '../../lib/auth'
 import { useFetch, formatDate } from '../../lib/useFetch'
 import { useToast } from '../../lib/toast'
-import type { AuditEntry, AuditVerify, Company, Engine, Reconciliation } from '../../types'
+import type { AuditEntry, AuditVerify, Reconciliation } from '../../types'
 import { StatusPill } from '../StatusPill'
 import { Spinner } from '../Spinner'
 import { ErrorNote } from '../ErrorNote'
@@ -14,10 +13,6 @@ import { DepartmentsTable } from './DepartmentsTable'
 import { useT } from '../../lib/i18n'
 import { sar } from '../../lib/money'
 
-const ENGINES: { value: Engine; label: string; description: string; icon: typeof Cpu }[] = [
-  { value: 'native', label: 'settings.engineNative', description: 'settings.engineNativeDesc', icon: Cpu },
-  { value: 'shotoku', label: 'settings.engineShotoku', description: 'settings.engineShotokuDesc', icon: Link2 },
-]
 
 function summariseDetails(details: Record<string, unknown> | null | undefined): string {
   if (!details || typeof details !== 'object') return ''
@@ -43,57 +38,6 @@ function ActorIcon({ type }: { type: AuditEntry['actor_type'] }) {
   if (type === 'agent') return <Bot className="h-3.5 w-3.5 text-brand" />
   if (type === 'user') return <User className="h-3.5 w-3.5 text-neutral-600" />
   return <Server className="h-3.5 w-3.5 text-neutral-400" />
-}
-
-function EngineSelector() {
-  const { company, setCompany } = useAuth()
-  const toast = useToast()
-  const t = useT()
-  const [saving, setSaving] = useState(false)
-  const setEngine = async (engine: Engine) => {
-    if (!company || company.engine === engine) return
-    setSaving(true)
-    try {
-      const { data } = await api.patch<Company>('/company', { engine })
-      setCompany(data)
-      toast.success(t('settings.engineSet', { engine: engine === 'native' ? 'Flaire native' : 'Shotoku sidecar' }))
-    } catch (err) {
-      toast.error(errorMessage(err))
-    } finally {
-      setSaving(false)
-    }
-  }
-  return (
-    <div>
-      <h4 className="text-sm font-semibold mb-2">{t('settings.engine')}</h4>
-      <div className="grid sm:grid-cols-2 gap-2">
-        {ENGINES.map((e) => {
-          const active = company?.engine === e.value
-          return (
-            <button
-              key={e.value}
-              type="button"
-              disabled={saving}
-              onClick={() => setEngine(e.value)}
-              className={`text-start flex items-start gap-3 rounded-card border px-3 py-3 transition-colors ${active ? 'border-brand bg-brand-light' : 'border-line hover:bg-lavender'}`}
-              aria-pressed={active}
-            >
-              <span className={`rounded-full p-1.5 ${active ? 'bg-brand text-white' : 'bg-lavender-deep text-neutral-600'}`}>
-                <e.icon className="h-4 w-4" />
-              </span>
-              <span className="flex-1">
-                <span className="text-sm font-semibold flex items-center gap-2">
-                  {t(e.label)}
-                  {active && <StatusPill tone="green">{t('status.active')}</StatusPill>}
-                </span>
-                <span className="block text-xs text-neutral-600 mt-0.5">{t(e.description)}</span>
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  )
 }
 
 function AuditLedger() {
@@ -259,7 +203,6 @@ export function AdvancedCard() {
         </Link>
       </div>
       <hr className="border-line" />
-      <EngineSelector />
       <hr className="border-line" />
       <AuditLedger />
       <hr className="border-line" />
